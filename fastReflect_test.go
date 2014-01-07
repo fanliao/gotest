@@ -87,7 +87,7 @@ func getFieldOffset(p interface{}, t *testing.T) map[string]uintptr {
 	for i := 0; i < tp.NumField()-1; i++ {
 		f := tp.Field(i)
 		fv := v.Field(i)
-		t.Log(f.Name, f.Type, v.Field(i+1).UnsafeAddr()-fv.UnsafeAddr())
+		t.Log(fv.UnsafeAddr()-v.UnsafeAddr(), f.Name, f.Type, v.Field(i+1).UnsafeAddr()-fv.UnsafeAddr())
 		result[f.Name] = v.Field(i+1).UnsafeAddr() - fv.UnsafeAddr()
 		t.Log(f.Name, fv.Type().Size())
 	}
@@ -171,67 +171,66 @@ func TestTypeSize(t *testing.T) {
 	}
 }
 
-func BenchmarkTypeCast(b *testing.B) {
-	o := &RWTestStruct{}
-	//var o2 *RWTestStruct
-	for i := 0; i < b.N; i++ {
-		var o1 interface{} = o
-		_ = o1.(*RWTestStruct)
-	}
-	b.StopTimer()
-	//b.Log(o2)
-}
+//func BenchmarkTypeCast(b *testing.B) {
+//	o := &RWTestStruct{}
+//	//var o2 *RWTestStruct
+//	for i := 0; i < b.N; i++ {
+//		var o1 interface{} = o
+//		_ = o1.(*RWTestStruct)
+//	}
+//	b.StopTimer()
+//	//b.Log(o2)
+//}
 
 func BenchmarkFastRWerGetByName(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
+	rw := GetFastRWer(o)
 	//var id int
 	//var name string
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = *((*int)(rw.Get(p, "Id")))
-		_ = *((*string)(rw.Get(p, "Name")))
+		_ = *((*int)(rw.GetPtrByName(p, "Id")))
+		_ = *((*string)(rw.GetPtrByName(p, "Name")))
 	}
 	//b.StopTimer()
 	//b.Log(id, name)
 }
 
-func BenchmarkFastRWerGetByIndex(b *testing.B) {
+func BenchmarkFastRWerGet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
+	rw := GetFastRWer(o)
 	//var id int
 	//var name string
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = *((*int)(rw.GetbyIndex(p, 0)))
-		_ = *((*string)(rw.GetbyIndex(p, 1)))
+		_ = *((*int)(rw.GetPtr(p, 0)))
+		_ = *((*string)(rw.GetPtr(p, 1)))
 	}
 	b.StopTimer()
 	//b.Log(id, name)
 }
 
-func BenchmarkFastGetByOffset(b *testing.B) {
+func BenchmarkFastRWerGetValue(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
-	//meta := rw.GetStructMeta()
-	//var id int
-	//var name string
+	rw := GetFastRWer(o)
+	var id interface{}
+	var name interface{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = *((*int)(fastGetByOffset(p, rw.FieldOffsetsByIndex[0])))
-		_ = *((*string)(fastGetByOffset(p, rw.FieldOffsetsByIndex[1])))
+		id = rw.GetValue(p, 0)
+		name = rw.GetValue(p, 1)
 	}
-	//b.StopTimer()
-	//b.Log(id, name)
+	b.StopTimer()
+	b.Log(id, name)
 }
 
 func BenchmarkFastGet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
+	rw := GetFastRWer(o)
 	//meta := rw.GetStructMeta()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -240,20 +239,20 @@ func BenchmarkFastGet(b *testing.B) {
 	}
 }
 
-func BenchmarkFastGetInline(b *testing.B) {
-	o := &RWTestStruct{1, "test"}
-	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
-	//var id int
-	//var name string
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = *((*int)(unsafe.Pointer(uintptr(p) + rw.FieldOffsetsByIndex[0])))
-		_ = *((*string)(unsafe.Pointer(uintptr(p) + rw.FieldOffsetsByIndex[1])))
-	}
-	//b.StopTimer()
-	//b.Log(id, name)
-}
+//func BenchmarkFastGetInline(b *testing.B) {
+//	o := &RWTestStruct{1, "test"}
+//	p := unsafe.Pointer(o)
+//	rw := GetFastRWer(o, p)
+//	//var id int
+//	//var name string
+//	b.ResetTimer()
+//	for i := 0; i < b.N; i++ {
+//		_ = *((*int)(unsafe.Pointer(uintptr(p) + rw.FieldOffsetsByIndex[0])))
+//		_ = *((*string)(unsafe.Pointer(uintptr(p) + rw.FieldOffsetsByIndex[1])))
+//	}
+//	//b.StopTimer()
+//	//b.Log(id, name)
+//}
 
 func BenchmarkOriginalGet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
@@ -298,118 +297,55 @@ func BenchmarkReflectGetByIndex(b *testing.B) {
 	//b.Log(id, name)
 }
 
-func BenchmarFastRWerSeter(b *testing.B) {
-	o := &RWTestStruct{1, "test"}
-	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
-	for i := 0; i < b.N; i++ {
-		rw.Set(p, "Id", 2)
-		rw.Set(p, "Name", "testSet")
-	}
-}
-
-func BenchmarkReflectSet(b *testing.B) {
+func BenchmarkReflectGetAddrByIndex(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	v := reflect.ValueOf(o).Elem()
 	//t := v.Type()
+	//var id int
+	//var name string
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		v.Field(0).SetInt(11)
-		v.Field(1).SetString("test reflect set")
+		_ = v.Field(0).UnsafeAddr()
+		_ = v.Field(1).UnsafeAddr()
 	}
-	b.StopTimer()
-	//b.Log(o.Id, o.Name)
+	//b.StopTimer()
+	//b.Log(id, name)
 }
 
-func BenchmarkFastSetInline(b *testing.B) {
+func BenchmarkFastRWerSetByName(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
-	meta := rw.GetStructMeta()
-	b.ResetTimer()
+	rw := GetFastRWer(o)
 	id := 1111111
 	name := "test unsafe set, great!"
 	idAddr := uintptr(unsafe.Pointer(&id))
 	nameAddr := uintptr(unsafe.Pointer(&name))
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		size1 := int(meta.FieldSizeByIndex[0])
-		size2 := int(meta.FieldSizeByIndex[1])
-		offset1 := uintptr(p) + meta.FieldOffsetsByIndex[0]
-		offset2 := uintptr(p) + meta.FieldOffsetsByIndex[1]
-		//bs := []bytes
-		switch size1 {
-		case 1:
-			*((*[1]byte)(unsafe.Pointer(offset1))) = *((*[1]byte)(unsafe.Pointer(idAddr)))
-		case 2:
-			*((*[2]byte)(unsafe.Pointer(offset1))) = *((*[2]byte)(unsafe.Pointer(idAddr)))
-		case 4:
-			*((*[4]byte)(unsafe.Pointer(offset1))) = *((*[4]byte)(unsafe.Pointer(idAddr)))
-		case 8:
-			*((*[8]byte)(unsafe.Pointer(offset1))) = *((*[8]byte)(unsafe.Pointer(idAddr)))
-		case 12:
-			*((*[12]byte)(unsafe.Pointer(offset1))) = *((*[12]byte)(unsafe.Pointer(idAddr)))
-		case 16:
-			*((*[16]byte)(unsafe.Pointer(offset1))) = *((*[16]byte)(unsafe.Pointer(idAddr)))
-		}
-
-		switch size2 {
-		case 1:
-			*((*[1]byte)(unsafe.Pointer(offset2))) = *((*[1]byte)(unsafe.Pointer(nameAddr)))
-		case 2:
-			*((*[2]byte)(unsafe.Pointer(offset2))) = *((*[2]byte)(unsafe.Pointer(nameAddr)))
-		case 4:
-			*((*[4]byte)(unsafe.Pointer(offset2))) = *((*[4]byte)(unsafe.Pointer(nameAddr)))
-		case 8:
-			*((*[8]byte)(unsafe.Pointer(offset2))) = *((*[8]byte)(unsafe.Pointer(nameAddr)))
-		case 12:
-			*((*[12]byte)(unsafe.Pointer(offset2))) = *((*[12]byte)(unsafe.Pointer(nameAddr)))
-		case 16:
-			*((*[16]byte)(unsafe.Pointer(offset2))) = *((*[16]byte)(unsafe.Pointer(nameAddr)))
-		}
-
-		//for j := 0; j < size1; j++ {
-		//	*((*[1]byte)(unsafe.Pointer(offset1 + uintptr(j)))) = *((*[1]byte)(unsafe.Pointer(idAddr + uintptr(j))))
-		//}
-		//for j := 0; j < size2; j++ {
-		//	*((*[1]byte)(unsafe.Pointer(offset2 + uintptr(j)))) = *((*[1]byte)(unsafe.Pointer(nameAddr + uintptr(j))))
-		//}
-		//*((*[size]byte)(unsafe.Pointer(uintptr(p) + meta.FieldOffsetsByIndex[0]))) = ([size]byte)(id)
-		//size = int(meta.FieldSizeByIndex[1])
-		//*((*[size]byte)(unsafe.Pointer(uintptr(p) + meta.FieldOffsetsByIndex[0]))) = ([size]byte)(name)
-		//*((*int)(unsafe.Pointer(uintptr(p) + meta.FieldOffsetsByIndex[0]))) = 11
-		//*((*string)(unsafe.Pointer(uintptr(p) + meta.FieldOffsetsByIndex[1]))) = "test"
+		rw.SetByName(p, "Id", idAddr)
+		rw.SetByName(p, "Name", nameAddr)
 	}
-	b.StopTimer()
-	//b.Log(o.Id, o.Name)
 }
 
-func BenchmarkCopyVar(b *testing.B) {
+func BenchmarkFastRWerSet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
-	b.ResetTimer()
+	rw := GetFastRWer(o)
 	id := 1111111
 	name := "test unsafe set, great!"
 	idAddr := uintptr(unsafe.Pointer(&id))
 	nameAddr := uintptr(unsafe.Pointer(&name))
-
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		size1 := (rw.FieldSizeByIndex[0])
-		size2 := (rw.FieldSizeByIndex[1])
-		offset1 := uintptr(p) + rw.FieldOffsetsByIndex[0]
-		offset2 := uintptr(p) + rw.FieldOffsetsByIndex[1]
-		//bs := []bytes
-		copyVar(offset1, idAddr, size1)
-		copyVar(offset2, nameAddr, size2)
+		rw.Set(p, 0, idAddr)
+		rw.Set(p, 1, nameAddr)
 	}
-	b.StopTimer()
-	//b.Log(o.Id, o.Name)
 }
 
 func BenchmarkFastSet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
+	rw := GetFastRWer(o)
 	b.ResetTimer()
 	id := 1111111
 	name := "test unsafe set, great!"
@@ -425,12 +361,49 @@ func BenchmarkFastSet(b *testing.B) {
 	//b.Log(o.Id, o.Name)
 }
 
+func BenchmarkCopyVar(b *testing.B) {
+	o := &RWTestStruct{1, "test"}
+	p := unsafe.Pointer(o)
+	rw := GetFastRWer(o)
+	b.ResetTimer()
+	id := 1111111
+	name := "test unsafe set, great!"
+	idAddr := uintptr(unsafe.Pointer(&id))
+	nameAddr := uintptr(unsafe.Pointer(&name))
+
+	for i := 0; i < b.N; i++ {
+		size1 := (rw.FieldSizeByIndex[0])
+		offset1 := uintptr(p) + rw.FieldOffsetsByIndex[0]
+		//bs := []bytes
+		copyVar(offset1, idAddr, size1)
+
+		size2 := (rw.FieldSizeByIndex[1])
+		offset2 := uintptr(p) + rw.FieldOffsetsByIndex[1]
+		copyVar(offset2, nameAddr, size2)
+	}
+	b.StopTimer()
+	//b.Log(o.Id, o.Name)
+}
+
 func BenchmarkOriginalSet(b *testing.B) {
 	o := &RWTestStruct{1, "test"}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		o.Id = 11
 		o.Name = "test"
+	}
+	b.StopTimer()
+	//b.Log(o.Id, o.Name)
+}
+
+func BenchmarkReflectSet(b *testing.B) {
+	o := &RWTestStruct{1, "test"}
+	v := reflect.ValueOf(o).Elem()
+	//t := v.Type()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		v.Field(0).SetInt(11)
+		v.Field(1).SetString("test reflect set")
 	}
 	b.StopTimer()
 	//b.Log(o.Id, o.Name)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"unsafe"
 )
 
 type RWTestStruct1 struct {
@@ -13,7 +12,6 @@ type RWTestStruct1 struct {
 func main() {
 	fmt.Println("Hello World 11!")
 	o := &RWTestStruct1{1, "test"}
-	p := unsafe.Pointer(o)
-	rw := getFastRWer(o, p)
+	rw := GetFastRWer(o)
 	fmt.Println(rw)
 }
