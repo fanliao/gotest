@@ -11,6 +11,7 @@ type StructMeta struct {
 	FieldOffsetsByName  map[string]uintptr
 	FieldOffsetsByIndex []uintptr
 	FieldNamesByIndex   []string
+	FieldSizeByIndex    []uintptr
 }
 
 type FastRWer interface {
@@ -22,14 +23,15 @@ type FastRWer interface {
 
 //FastRWer implement class
 type defaultFastRWImpl struct {
-	structMeta     StructMeta
+	StructMeta
 	GetbyIndexImpl func(this defaultFastRWImpl, obj unsafe.Pointer, i int) unsafe.Pointer
 	GetImpl        func(this defaultFastRWImpl, obj unsafe.Pointer, fieldName string) unsafe.Pointer
 	SetImpl        func(this defaultFastRWImpl, obj unsafe.Pointer, fieldName string, value interface{})
 }
 
 func (this defaultFastRWImpl) GetbyIndex(obj unsafe.Pointer, i int) unsafe.Pointer {
-	return this.GetbyIndexImpl(this, obj, i)
+	//return this.GetbyIndexImpl(this, obj, i)
+	return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
 func (this defaultFastRWImpl) Get(obj unsafe.Pointer, fieldName string) unsafe.Pointer {
@@ -41,20 +43,20 @@ func (this defaultFastRWImpl) Set(obj unsafe.Pointer, fieldName string, value in
 }
 
 func (this defaultFastRWImpl) GetStructMeta() StructMeta {
-	return this.structMeta
+	return this.StructMeta
 }
 
 //factory function
 func newFastRWImpl(structMeta StructMeta,
 	getByIndex func(this defaultFastRWImpl, obj unsafe.Pointer, i int) unsafe.Pointer,
 	get func(this defaultFastRWImpl, obj unsafe.Pointer, fieldName string) unsafe.Pointer,
-	set func(this defaultFastRWImpl, obj unsafe.Pointer, fieldName string, value interface{})) defaultFastRWImpl {
-	return defaultFastRWImpl{structMeta, getByIndex, get, set}
+	set func(this defaultFastRWImpl, obj unsafe.Pointer, fieldName string, value interface{})) *defaultFastRWImpl {
+	return &defaultFastRWImpl{structMeta, getByIndex, get, set}
 }
 
 //Get a FastRWer implement class by a pointer of struct
 //obj must be a pointer of struct value
-func getFastRWer(obj interface{}, p unsafe.Pointer) FastRWer {
+func getFastRWer(obj interface{}, p unsafe.Pointer) *defaultFastRWImpl {
 	v := reflect.Indirect(reflect.ValueOf(obj))
 	//fmt.Println(v)
 	t := v.Type()
@@ -67,12 +69,14 @@ func getFastRWer(obj interface{}, p unsafe.Pointer) FastRWer {
 	meta.FieldOffsetsByName = make(map[string]uintptr)
 	meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
 	meta.FieldNamesByIndex = make([]string, numField, numField)
+	meta.FieldSizeByIndex = make([]uintptr, numField, numField)
 	for i := 0; i < t.NumField(); i++ {
 		fType := t.Field(i)
 		f := v.Field(i)
 		meta.FieldOffsetsByIndex[i] = f.UnsafeAddr() - objAddr
 		meta.FieldOffsetsByName[fType.Name] = meta.FieldOffsetsByIndex[i]
 		meta.FieldNamesByIndex[i] = fType.Name
+		meta.FieldSizeByIndex[i] = f.Type().Size()
 		//v := f.Interface()
 	}
 
@@ -87,4 +91,51 @@ func getFastRWer(obj interface{}, p unsafe.Pointer) FastRWer {
 			//p := unsafe.Pointer(uintptr(unsafe.Pointer((*interface{})(obj))) + meta.FieldOffsetsByName[fieldName])
 			//&((*interface{})(p)) = value
 		})
+}
+
+func fastGetByOffset(obj unsafe.Pointer, offset uintptr) unsafe.Pointer {
+	//return this.GetbyIndexImpl(this, obj, i)
+	return unsafe.Pointer(uintptr(obj) + offset)
+}
+
+func FastGet(obj unsafe.Pointer, this *defaultFastRWImpl, i int) unsafe.Pointer {
+	//return this.GetbyIndexImpl(this, obj, i)
+	return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
+}
+
+func FastSet(obj unsafe.Pointer, this *defaultFastRWImpl, i int, source uintptr) {
+	size := this.FieldSizeByIndex[i]
+	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
+	copyVar(target, source, size)
+}
+
+func copyVar(target uintptr, source uintptr, size uintptr) {
+	switch size {
+	case 1:
+		*((*[1]byte)(unsafe.Pointer(target))) = *((*[1]byte)(unsafe.Pointer(source)))
+	case 2:
+		*((*[2]byte)(unsafe.Pointer(target))) = *((*[2]byte)(unsafe.Pointer(source)))
+	case 4:
+		*((*[4]byte)(unsafe.Pointer(target))) = *((*[4]byte)(unsafe.Pointer(source)))
+	case 8:
+		*((*[8]byte)(unsafe.Pointer(target))) = *((*[8]byte)(unsafe.Pointer(source)))
+	case 12:
+		*((*[12]byte)(unsafe.Pointer(target))) = *((*[12]byte)(unsafe.Pointer(source)))
+	case 16:
+		*((*[16]byte)(unsafe.Pointer(target))) = *((*[16]byte)(unsafe.Pointer(source)))
+	default:
+		unWriteSize := size
+		targetAddr := target
+		sourceAddr := source
+		for {
+			if unWriteSize <= 16 {
+				copyVar(targetAddr, sourceAddr, unWriteSize)
+			}
+			*((*[16]byte)(unsafe.Pointer(targetAddr))) = *((*[16]byte)(unsafe.Pointer(sourceAddr)))
+			targetAddr += 16
+			sourceAddr += 16
+			unWriteSize -= 16
+		}
+	}
+
 }
