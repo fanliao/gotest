@@ -1,7 +1,7 @@
 package main
 
 import (
-	//"fmt"
+	//	"fmt"
 	"reflect"
 	"time"
 	"unsafe"
@@ -23,23 +23,23 @@ type FastRW struct {
 	StructMeta
 }
 
-func (this *FastRW) GetPtr(obj unsafe.Pointer, i int) unsafe.Pointer {
+func (this *FastRW) Ptr(obj unsafe.Pointer, i int) unsafe.Pointer {
 	return FastGet(obj, this, i)
 	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
-func (this *FastRW) GetValue(obj unsafe.Pointer, i int) interface{} {
+func (this *FastRW) Value(obj unsafe.Pointer, i int) interface{} {
 	ptr := FastGet(obj, this, i)
 	return getValue(this.FieldTypesByIndex[i], ptr)
 	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
-func (this *FastRW) GetPtrByName(obj unsafe.Pointer, fieldName string) unsafe.Pointer {
-	return this.GetPtr(obj, this.FieldIndexsByName[fieldName])
+func (this *FastRW) PtrByName(obj unsafe.Pointer, fieldName string) unsafe.Pointer {
+	return this.Ptr(obj, this.FieldIndexsByName[fieldName])
 }
 
 func (this *FastRW) GetValueByName(obj unsafe.Pointer, fieldName string) interface{} {
-	return this.GetValue(obj, this.FieldIndexsByName[fieldName])
+	return this.Value(obj, this.FieldIndexsByName[fieldName])
 	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
@@ -121,26 +121,50 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 		*((*[1]byte)(unsafe.Pointer(target))) = *((*[1]byte)(unsafe.Pointer(source)))
 	case 2:
 		*((*[2]byte)(unsafe.Pointer(target))) = *((*[2]byte)(unsafe.Pointer(source)))
+	case 3:
+		*((*[3]byte)(unsafe.Pointer(target))) = *((*[3]byte)(unsafe.Pointer(source)))
 	case 4:
 		*((*[4]byte)(unsafe.Pointer(target))) = *((*[4]byte)(unsafe.Pointer(source)))
+	case 5:
+		*((*[5]byte)(unsafe.Pointer(target))) = *((*[5]byte)(unsafe.Pointer(source)))
+	case 6:
+		*((*[6]byte)(unsafe.Pointer(target))) = *((*[6]byte)(unsafe.Pointer(source)))
+	case 7:
+		*((*[7]byte)(unsafe.Pointer(target))) = *((*[7]byte)(unsafe.Pointer(source)))
 	case 8:
 		*((*[8]byte)(unsafe.Pointer(target))) = *((*[8]byte)(unsafe.Pointer(source)))
+	case 9:
+		*((*[9]byte)(unsafe.Pointer(target))) = *((*[9]byte)(unsafe.Pointer(source)))
+	case 10:
+		*((*[10]byte)(unsafe.Pointer(target))) = *((*[10]byte)(unsafe.Pointer(source)))
+	case 11:
+		*((*[11]byte)(unsafe.Pointer(target))) = *((*[11]byte)(unsafe.Pointer(source)))
 	case 12:
 		*((*[12]byte)(unsafe.Pointer(target))) = *((*[12]byte)(unsafe.Pointer(source)))
+	case 13:
+		*((*[13]byte)(unsafe.Pointer(target))) = *((*[13]byte)(unsafe.Pointer(source)))
+	case 14:
+		*((*[14]byte)(unsafe.Pointer(target))) = *((*[14]byte)(unsafe.Pointer(source)))
+	case 15:
+		*((*[15]byte)(unsafe.Pointer(target))) = *((*[15]byte)(unsafe.Pointer(source)))
 	case 16:
 		*((*[16]byte)(unsafe.Pointer(target))) = *((*[16]byte)(unsafe.Pointer(source)))
+	case 24:
+		*((*[24]byte)(unsafe.Pointer(target))) = *((*[24]byte)(unsafe.Pointer(source)))
 	default:
 		unWriteSize := size
 		targetAddr := target
 		sourceAddr := source
 		for {
-			if unWriteSize <= 16 {
+			if unWriteSize <= 16 || unWriteSize == 24 {
 				copyVar(targetAddr, sourceAddr, unWriteSize)
+				return
+			} else {
+				*((*[16]byte)(unsafe.Pointer(targetAddr))) = *((*[16]byte)(unsafe.Pointer(sourceAddr)))
+				targetAddr += 16
+				sourceAddr += 16
+				unWriteSize -= 16
 			}
-			*((*[16]byte)(unsafe.Pointer(targetAddr))) = *((*[16]byte)(unsafe.Pointer(sourceAddr)))
-			targetAddr += 16
-			sourceAddr += 16
-			unWriteSize -= 16
 		}
 	}
 }
