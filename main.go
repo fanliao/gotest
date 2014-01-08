@@ -62,22 +62,14 @@ func benchmarkFastRWerGet(n int) {
 }
 
 func benchmarkFastRWerGetValue(n int) {
-	f, _ := os.Create("profile_file")
 	o := &RWTestStruct{1, "test", 1.1, time.Now()}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
-	var id interface{}
-	var name interface{}
-	var date interface{}
-	var cash interface{}
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
 	for i := 0; i < n; i++ {
-		id = rw.GetValue(p, 0)
-		name = rw.GetValue(p, 1)
-		cash = rw.GetValue(p, 2)
-		date = rw.GetValue(p, 3)
+		_ = rw.GetValue(p, 0)
+		_ = rw.GetValue(p, 1)
+		_ = rw.GetValue(p, 2)
+		_ = rw.GetValue(p, 3)
 	}
-	fmt.Println(id, name, cash, date)
-	fmt.Println("done")
+
 }
