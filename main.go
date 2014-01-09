@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"runtime/pprof"
 	"time"
 	"unsafe"
 )
 
+const ptrSize int = int(unsafe.Sizeof(int(0)))
+
 type RWTestStruct1 struct {
-	Id   int
-	Name string
+	Id1   int
+	Name1 string
 }
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -22,21 +25,34 @@ type RWTestStruct2 struct {
 	Name string
 	Cash float32
 	Date time.Time
-	Rest *RWTestStruct1
+	RWTestStruct1
 }
 
 func main() {
-	fmt.Println("Hello World 1111!")
+	fmt.Println("Hello World 1122!")
 	//o := &RWTestStruct1{1, "test"}
 	//rw := GetFastRWer(o)
 	//fmt.Println(rw)
 
-	var a *RWTestStruct2
+	var a *RWTestStruct2 = &RWTestStruct2{}
 	fmt.Println(a)
 	fmt.Println(uintptr(unsafe.Pointer(a)))
 
-	b := RWTestStruct2{}
-	fmt.Println(b)
+	b := unsafe.Pointer(&a)
+	fmt.Println("b=", b)
+
+	d := *((*[ptrSize]byte)(b))
+	fmt.Println("d = ", d)
+	fmt.Println("step 2")
+
+	v := reflect.Indirect(reflect.ValueOf(*a))
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		fType := t.Field(i)
+		f := v.Field(i)
+		fmt.Println(fType.Name, f.Type().Size(), f.Type())
+	}
 
 	benchmarkFastRWerSetValueByName()
 	flag.Parse()
@@ -57,7 +73,7 @@ func main() {
 }
 
 func benchmarkFastRWerGet(n int) {
-	o := &RWTestStruct2{1, "test", 1.1, time.Now(), &RWTestStruct1{}}
+	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	//var id int
@@ -72,7 +88,7 @@ func benchmarkFastRWerGet(n int) {
 }
 
 func benchmarkFastRWerGetValue(n int) {
-	o := &RWTestStruct2{1, "test", 1.1, time.Now(), &RWTestStruct1{}}
+	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	for i := 0; i < n; i++ {
@@ -85,7 +101,7 @@ func benchmarkFastRWerGetValue(n int) {
 }
 
 func benchmarkFastRWerSetValueByName() {
-	o := &RWTestStruct2{1, "test", 1.1, time.Now(), nil}
+	o := &RWTestStruct2{}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	id := 1111111

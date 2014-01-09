@@ -3,13 +3,17 @@ package main
 import (
 	//	"fmt"
 	"reflect"
+	"sync"
 	"time"
 	"unsafe"
 )
 
-var dateType reflect.Type = reflect.TypeOf(time.Now())
+type metaCache struct {
+	lock  *sync.RWMutex
+	metas map[reflect.Type]*FastRW
+}
 
-type StructMeta struct {
+type structMeta struct {
 	//IsFixedSize         bool
 	FieldIndexsByName   map[string]int
 	FieldOffsetsByIndex []uintptr
@@ -20,18 +24,44 @@ type StructMeta struct {
 
 //FastRWer implement class
 type FastRW struct {
-	StructMeta
+	structMeta
+}
+
+var dateType reflect.Type = reflect.TypeOf(time.Now())
+var mc *metaCache
+
+func init() {
+	mc = &metaCache{}
+	mc.lock = new(sync.RWMutex)
+	mc.metas = make(map[reflect.Type]*FastRW)
+}
+
+func (this *metaCache) get(typ reflect.Type) *FastRW {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	if val, ok := this.metas[typ]; ok {
+		return val
+	}
+	return nil
+}
+
+func (this *metaCache) set(typ reflect.Type, rw *FastRW) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	if val, ok := this.metas[typ]; !ok {
+		this.metas[typ] = rw
+	} else if val != rw {
+		this.metas[typ] = rw
+	}
 }
 
 func (this *FastRW) Ptr(obj unsafe.Pointer, i int) unsafe.Pointer {
 	return FastGet(obj, this, i)
-	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
 func (this *FastRW) Value(obj unsafe.Pointer, i int) interface{} {
-	ptr := FastGet(obj, this, i)
-	return getValue(this.FieldTypesByIndex[i], ptr)
-	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
+	typ, ptr := this.FieldTypesByIndex[i], FastGet(obj, this, i)
+	return getValue(typ, ptr)
 }
 
 func (this *FastRW) PtrByName(obj unsafe.Pointer, fieldName string) unsafe.Pointer {
@@ -40,7 +70,6 @@ func (this *FastRW) PtrByName(obj unsafe.Pointer, fieldName string) unsafe.Point
 
 func (this *FastRW) GetValueByName(obj unsafe.Pointer, fieldName string) interface{} {
 	return this.Value(obj, this.FieldIndexsByName[fieldName])
-	//return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
 func (this *FastRW) SetPtr(obj unsafe.Pointer, i int, source uintptr) {
@@ -68,7 +97,6 @@ func (this *FastRW) SetValueByName(obj unsafe.Pointer, fieldName string, source 
 }
 
 func FastGet(obj unsafe.Pointer, this *FastRW, i int) unsafe.Pointer {
-	//return this.GetbyIndexImpl(this, obj, i)
 	return unsafe.Pointer(uintptr(obj) + this.FieldOffsetsByIndex[i])
 }
 
@@ -82,37 +110,42 @@ func FastSet(obj unsafe.Pointer, this *FastRW, i int, source uintptr) {
 func GetFastRWer(obj interface{}) *FastRW {
 	v := reflect.Indirect(reflect.ValueOf(obj))
 	t := v.Type()
-	objAddr := v.UnsafeAddr()
-	numField := t.NumField()
 
-	meta := StructMeta{}
-	meta.FieldIndexsByName = make(map[string]int, numField)
-	meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
-	meta.FieldNamesByIndex = make([]string, numField, numField)
-	meta.FieldSizeByIndex = make([]uintptr, numField, numField)
-	meta.FieldTypesByIndex = make([]reflect.Type, numField, numField)
-	for i := 0; i < t.NumField(); i++ {
-		fType := t.Field(i)
-		f := v.Field(i)
-		meta.FieldOffsetsByIndex[i] = f.UnsafeAddr() - objAddr
-		meta.FieldIndexsByName[fType.Name] = i
-		meta.FieldNamesByIndex[i] = fType.Name
-		meta.FieldSizeByIndex[i] = f.Type().Size()
-		meta.FieldTypesByIndex[i] = f.Type()
-		//v := f.Interface()
+	if fastRW := mc.get(t); fastRW != nil {
+		return fastRW
+	} else {
+
+		meta := structMeta{}
+
+		objAddr := v.UnsafeAddr()
+		numField := t.NumField()
+
+		meta.FieldIndexsByName = make(map[string]int, numField)
+		meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
+		meta.FieldNamesByIndex = make([]string, numField, numField)
+		meta.FieldSizeByIndex = make([]uintptr, numField, numField)
+		meta.FieldTypesByIndex = make([]reflect.Type, numField, numField)
+		for i := 0; i < t.NumField(); i++ {
+			fType := t.Field(i)
+			f := v.Field(i)
+			meta.FieldOffsetsByIndex[i] = f.UnsafeAddr() - objAddr
+			meta.FieldIndexsByName[fType.Name] = i
+			meta.FieldNamesByIndex[i] = fType.Name
+			meta.FieldSizeByIndex[i] = f.Type().Size()
+			meta.FieldTypesByIndex[i] = f.Type()
+			//v := f.Interface()
+		}
+
+		fastRW = newFastRWImpl(meta)
+		mc.set(t, fastRW)
+		return fastRW
 	}
 
-	return newFastRWImpl(meta)
 }
 
 //factory function
-func newFastRWImpl(structMeta StructMeta) *FastRW {
-	return &FastRW{structMeta}
-}
-
-func fastGetByOffset(obj unsafe.Pointer, offset uintptr) unsafe.Pointer {
-	//return this.GetbyIndexImpl(this, obj, i)
-	return unsafe.Pointer(uintptr(obj) + offset)
+func newFastRWImpl(meta structMeta) *FastRW {
+	return &FastRW{meta}
 }
 
 func copyVar(target uintptr, source uintptr, size uintptr) {
@@ -206,7 +239,10 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 	case reflect.Struct:
 		if typ == dateType {
 			return *((*time.Time)(ptr))
+		} else {
+			return reflect.NewAt(typ, ptr).Elem().Interface()
 		}
+	default:
+		return reflect.NewAt(typ, ptr).Elem().Interface()
 	}
-	return reflect.NewAt(typ, ptr).Elem().Interface()
 }

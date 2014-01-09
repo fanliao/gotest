@@ -399,7 +399,7 @@ func BenchmarkFastRWerSetValue(b *testing.B) {
 	}
 }
 
-func BenchmarkFastSetPtr(b *testing.B) {
+func BenchmarkFastSet(b *testing.B) {
 	o := &RWTestStruct{1, "test", 1.1, time.Now(), nil}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
