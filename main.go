@@ -3,10 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
-	"os"
+	//"log"
+	//"os"
+	//"runtime/pprof"
 	"reflect"
-	"runtime/pprof"
 	"time"
 	"unsafe"
 )
@@ -57,19 +57,21 @@ func main() {
 	benchmarkFastRWerSetValueByName()
 	flag.Parse()
 
-	//if *cpuprofile != "" {
-	f, err := os.Create("profile_file")
-	if err != nil {
-		log.Fatal(err)
-	}
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
-	benchmarkFastRWerGet(500000)
-	benchmarkFastRWerGetValue(500000)
+	////if *cpuprofile != "" {
+	//f, err := os.Create("profile_file")
+	//if err != nil {
+	//	log.Fatal(err)
 	//}
-	//var s string
-	//s = nil
-	//fmt.Println(s)
+	//pprof.StartCPUProfile(f)
+	//defer pprof.StopCPUProfile()
+	//benchmarkFastRWerGet(500000)
+	//benchmarkFastRWerGetValue(500000)
+	////}
+	////var s string
+	////s = nil
+	////fmt.Println(s)
+
+	testChan()
 }
 
 func benchmarkFastRWerGet(n int) {
@@ -118,4 +120,56 @@ func benchmarkFastRWerSetValueByName() {
 	rw.SetValueByName(p, "Date", date)
 	rw.SetValueByName(p, "Ptr", ptr)
 	//}
+}
+
+//Future代表一个异步任务
+type Future struct {
+	chDone    chan int
+	chTrigger chan int
+	chFail    chan int
+}
+
+//Get函数将一直阻塞直到任务完成
+func (this Future) Get() int {
+	return <-this.chTrigger
+}
+
+func (this Future) Reslove(v int) {
+	this.chDone <- v
+}
+
+func (this Future) start() {
+	i := <-this.chDone
+	callback()
+	this.chTrigger <- i
+	fmt.Println("is received")
+}
+
+func newFuture() *Future {
+	f := &Future{make(chan int, 1), make(chan int, 1), make(chan int)}
+	return f
+}
+func callback() {
+	fmt.Println("callback")
+}
+
+func task() *Future {
+	f := newFuture()
+	go func() {
+		time.Sleep(1 * time.Second)
+		f.Reslove(10)
+		fmt.Println("send done")
+	}()
+	go func() {
+		f.start()
+	}()
+	fmt.Println("end start")
+	return f
+}
+func testChan() {
+	f := task()
+
+	fmt.Println("begin receive")
+	time.Sleep(2 * time.Second)
+	fmt.Println("receive", f.Get())
 }

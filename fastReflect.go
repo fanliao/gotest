@@ -246,3 +246,20 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 		return reflect.NewAt(typ, ptr).Elem().Interface()
 	}
 }
+
+// interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
+type interfaceHeader struct {
+	typ  unsafe.Pointer
+	word unsafe.Pointer
+}
+
+func InterfaceToPtr(i interface{}) unsafe.Pointer {
+	s := *(*interfaceHeader)(unsafe.Pointer(&i))
+	return s.word
+}
+
+//func InterfaceToSliceHeader(i interface{}) unsafe.SliceHeader {
+//	p := InterfaceToPtr(i)
+//	s := *(*SliceHeader)(p)
+//	return s
+//}
