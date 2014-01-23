@@ -1,7 +1,7 @@
 package main
 
 import (
-	//	"fmt"
+	//"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -62,6 +62,11 @@ func (this *FastRW) Ptr(obj unsafe.Pointer, i int) unsafe.Pointer {
 func (this *FastRW) Value(obj unsafe.Pointer, i int) interface{} {
 	typ, ptr := this.FieldTypesByIndex[i], FastGet(obj, this, i)
 	return getValue(typ, ptr)
+}
+
+func (this *FastRW) CopyPtr(obj unsafe.Pointer, i int, target unsafe.Pointer) {
+	ptr := FastGet(obj, this, i)
+	copyVar(uintptr(target), uintptr(ptr), this.FieldSizeByIndex[i])
 }
 
 func (this *FastRW) PtrByName(obj unsafe.Pointer, fieldName string) unsafe.Pointer {
@@ -149,6 +154,7 @@ func newFastRWImpl(meta structMeta) *FastRW {
 }
 
 func copyVar(target uintptr, source uintptr, size uintptr) {
+	//fmt.Println("target=", target, " source=", source)
 	switch size {
 	case 1:
 		*((*[1]byte)(unsafe.Pointer(target))) = *((*[1]byte)(unsafe.Pointer(source)))
@@ -238,6 +244,7 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 		return *((*string)(ptr))
 	case reflect.Struct:
 		if typ == dateType {
+			//fmt.Println("use *time")
 			return *((*time.Time)(ptr))
 		} else {
 			return reflect.NewAt(typ, ptr).Elem().Interface()
