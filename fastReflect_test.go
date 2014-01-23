@@ -148,6 +148,29 @@ func TestTypeSize(t *testing.T) {
 	}
 }
 
+func TestFastRWerValue(t *testing.T) {
+	//f, _ := os.Create("profile_file")
+	o := &RWTestStruct{1, "test", 1.1, time.Now(), nil}
+	p := unsafe.Pointer(o)
+	rw := GetFastRWer(o)
+	var id interface{}
+	var name interface{}
+	var date interface{}
+	var cash interface{}
+	var ptr *RWTestStruct
+	//pprof.StartCPUProfile(f)
+	//defer pprof.StopCPUProfile()
+	for i := 0; i < 1; i++ {
+		id = rw.Value(p, 0)
+		name = rw.Value(p, 1)
+		cash = rw.Value(p, 2)
+		date = rw.Value(p, 3)
+		ptr1 := unsafe.Pointer(&ptr)
+		rw.CopyPtr(p, 4, ptr1)
+	}
+	t.Log(id, name, cash, date, ptr)
+}
+
 //func BenchmarkTypeCast(b *testing.B) {
 //	o := &RWTestStruct{}
 //	//var o2 *RWTestStruct
@@ -204,7 +227,8 @@ func BenchmarkFastRWerValue(b *testing.B) {
 	var name interface{}
 	var date interface{}
 	var cash interface{}
-	var ptr interface{}
+	//var ptr interface{}
+	var ptr *RWTestStruct
 	//pprof.StartCPUProfile(f)
 	//defer pprof.StopCPUProfile()
 	b.ResetTimer()
@@ -213,7 +237,9 @@ func BenchmarkFastRWerValue(b *testing.B) {
 		name = rw.Value(p, 1)
 		cash = rw.Value(p, 2)
 		date = rw.Value(p, 3)
-		ptr = rw.Value(p, 4)
+		//ptr = rw.Value(p, 4)
+		ptr1 := unsafe.Pointer(&ptr)
+		rw.CopyPtr(p, 4, ptr1)
 	}
 	b.StopTimer()
 	b.Log(id, name, cash, date, ptr)
