@@ -6,13 +6,9 @@ import (
 	//"log"
 	//"os"
 	//"runtime/pprof"
-<<<<<<< HEAD
-	"reflect"
-=======
 	"container/list"
 	"reflect"
 	"sync"
->>>>>>> 37e97fb4a5b6da8af780e1be6c840ac2f893d9e7
 	"time"
 	"unsafe"
 )
@@ -67,7 +63,6 @@ func main() {
 	//f, err := os.Create("profile_file")
 	//if err != nil {
 	//	log.Fatal(err)
-<<<<<<< HEAD
 	//}
 	//pprof.StartCPUProfile(f)
 	//defer pprof.StopCPUProfile()
@@ -78,18 +73,6 @@ func main() {
 	////s = nil
 	////fmt.Println(s)
 
-=======
-	//}
-	//pprof.StartCPUProfile(f)
-	//defer pprof.StopCPUProfile()
-	//benchmarkFastRWerGet(500000)
-	//benchmarkFastRWerGetValue(500000)
-
-	//}
-	//var s string
-	//s = nil
-	//fmt.Println(s)
->>>>>>> 37e97fb4a5b6da8af780e1be6c840ac2f893d9e7
 	testChan()
 }
 
@@ -141,41 +124,6 @@ func benchmarkFastRWerSetValueByName() {
 	//}
 }
 
-<<<<<<< HEAD
-//Future代表一个异步任务
-type Future struct {
-	chDone    chan int
-	chTrigger chan int
-	chFail    chan int
-}
-
-//Get函数将一直阻塞直到任务完成
-func (this Future) Get() int {
-	return <-this.chTrigger
-}
-
-func (this Future) Reslove(v int) {
-	this.chDone <- v
-}
-
-func (this Future) start() {
-	i := <-this.chDone
-	callback()
-	this.chTrigger <- i
-	fmt.Println("is received")
-}
-
-func newFuture() *Future {
-	f := &Future{make(chan int, 1), make(chan int, 1), make(chan int)}
-	return f
-}
-func callback() {
-	fmt.Println("callback")
-}
-
-func task() *Future {
-	f := newFuture()
-=======
 type futureResult struct {
 	result []interface{}
 	ok     bool
@@ -183,14 +131,16 @@ type futureResult struct {
 
 //Future代表一个异步任务
 type Future struct {
-	lock   *sync.Mutex
-	chIn   chan *futureResult
-	chOut  chan *futureResult
-	dones  *list.List
-	fails  *list.List
-	always *list.List
-	pipe   func(v ...interface{}) *Future
-	r      *futureResult
+	lock         *sync.Mutex
+	chIn         chan *futureResult
+	chOut        chan *futureResult
+	dones        *list.List
+	fails        *list.List
+	always       *list.List
+	pipeTask     func(v ...interface{}) *Future
+	pipeFuture   *Future
+	targetFuture *Future
+	r            *futureResult
 }
 
 //Get函数将一直阻塞直到任务完成
@@ -214,54 +164,80 @@ func (this *Future) Reject(v ...interface{}) {
 	close(this.chIn)
 }
 
-func (this *Future) Done(callback func(v ...interface{})) *Future {
+func (this *Future) Done(callbacks ...func(v ...interface{})) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+
+	if this.targetFuture != nil {
+		this.targetFuture.Done(callbacks...)
+		return this
+	}
 	if this.r != nil {
 		if this.r.ok {
-			callback(this.r.result...)
+			for _, c := range callbacks {
+				c(this.r.result...)
+			}
 		}
 	} else {
-		this.dones.PushBack(callback)
+		for _, c := range callbacks {
+			this.dones.PushBack(c)
+		}
 	}
 	return this
 }
 
-func (this *Future) Fail(callback func(v ...interface{})) *Future {
+func (this *Future) Fail(callbacks ...func(v ...interface{})) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+	if this.targetFuture != nil {
+		this.targetFuture.Fail(callbacks...)
+		return this
+	}
 	if this.r != nil {
 		if !this.r.ok {
-			callback(this.r.result...)
+			for _, c := range callbacks {
+				c(this.r.result...)
+			}
 		}
 	} else {
-		this.fails.PushBack(callback)
+		for _, c := range callbacks {
+			this.fails.PushBack(c)
+		}
 	}
 	return this
 }
 
-func (this *Future) Always(callback func(v ...interface{})) *Future {
+func (this *Future) Always(callbacks ...func(v ...interface{})) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+	if this.targetFuture != nil {
+		this.targetFuture.Always(callbacks...)
+		return this
+	}
 	if this.r != nil {
-		callback(this.r.result...)
+		for _, c := range callbacks {
+			c(this.r.result...)
+		}
 	} else {
-		this.always.PushBack(callback)
+		for _, c := range callbacks {
+			this.always.PushBack(c)
+		}
 	}
 	return this
 }
 
-//Todo
+//
 func (this *Future) Pipe(callback func(v ...interface{}) *Future) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	if this.r != nil {
-		this.pipe = callback
-		f := this.pipe(this.r.result...)
+		this.pipeTask = callback
+		f := this.pipeTask(this.r.result...)
 		return f
 	} else {
-		this.pipe = callback
-		return nil
+		this.pipeTask = callback
+		this.pipeFuture = NewFuture()
+		return this.pipeFuture
 	}
 
 }
@@ -269,7 +245,25 @@ func (this *Future) Pipe(callback func(v ...interface{}) *Future) *Future {
 func (this *Future) start() {
 	r := <-this.chIn
 	this.callback(r)
-	this.chOut <- r
+	if this.pipeTask == nil {
+		this.chOut <- r
+	} else {
+		//下面触发pipe的Future任务，但如果在之后调用pipeFuture的Done, Fail, Always，如何处理？
+		f := this.pipeTask(this.r.result...)
+		forList := func(funcs *list.List, f func(*list.Element)) {
+			for e := funcs.Front(); e != nil; e = e.Next() {
+				f(e)
+			}
+		}
+
+		forList(this.pipeFuture.dones, func(e *list.Element) { f.Done(e.Value.(func(v ...interface{}))) })
+		forList(this.pipeFuture.fails, func(e *list.Element) { f.Fail(e.Value.(func(v ...interface{}))) })
+		forList(this.pipeFuture.always, func(e *list.Element) { f.Always(e.Value.(func(v ...interface{}))) })
+		this.pipeFuture.targetFuture = f
+		//f.Done(this.pipeFuture.dones...)
+		//f.Fail(this.pipeFuture.fails...)
+		//f.Always(this.pipeFuture.always...)
+	}
 	close(this.chOut)
 	fmt.Println("is received")
 }
@@ -279,21 +273,25 @@ func (this *Future) callback(r *futureResult) {
 	defer this.lock.Unlock()
 	this.r = r
 	fmt.Println("callback")
+
+	var callbacks *list.List
 	if r.ok {
-		for e := this.dones.Front(); e != nil; e = e.Next() {
-			f := e.Value.(func(v ...interface{}))
-			f(r.result...)
-		}
+		callbacks = this.dones
+
 	} else {
-		for e := this.fails.Front(); e != nil; e = e.Next() {
+		callbacks = this.fails
+
+	}
+
+	forFuncs := func(funcs *list.List) {
+		for e := funcs.Front(); e != nil; e = e.Next() {
 			f := e.Value.(func(v ...interface{}))
 			f(r.result...)
 		}
 	}
-	for e := this.always.Front(); e != nil; e = e.Next() {
-		f := e.Value.(func(v ...interface{}))
-		f(r.result...)
-	}
+	forFuncs(callbacks)
+	forFuncs(this.always)
+
 }
 
 func NewFuture() *Future {
@@ -303,7 +301,7 @@ func NewFuture() *Future {
 		list.New(),
 		list.New(),
 		list.New(),
-		nil, nil}
+		nil, nil, nil, nil}
 	go func() {
 		f.start()
 	}()
@@ -337,18 +335,13 @@ func task() *Future {
 		fmt.Println("callback", v)
 	}
 	f := NewFuture().Done(c)
->>>>>>> 37e97fb4a5b6da8af780e1be6c840ac2f893d9e7
+
 	go func() {
 		time.Sleep(1 * time.Second)
 		f.Reslove(10)
 		fmt.Println("send done")
 	}()
-<<<<<<< HEAD
-	go func() {
-		f.start()
-	}()
-=======
->>>>>>> 37e97fb4a5b6da8af780e1be6c840ac2f893d9e7
+
 	fmt.Println("end start")
 	return f
 }
@@ -357,13 +350,9 @@ func testChan() {
 
 	fmt.Println("begin receive")
 	time.Sleep(2 * time.Second)
-<<<<<<< HEAD
-	fmt.Println("receive", f.Get())
-=======
 	r, ok := f.Get()
 	fmt.Println("receive", r, ok)
 	r, ok = f.Get()
 	fmt.Println("receive again", r, ok)
 
->>>>>>> 37e97fb4a5b6da8af780e1be6c840ac2f893d9e7
 }
