@@ -131,12 +131,12 @@ type futureResult struct {
 
 //Future代表一个异步任务
 type Future struct {
-	lock         *sync.Mutex
-	chIn         chan *futureResult
-	chOut        chan *futureResult
-	dones        *list.List
-	fails        *list.List
-	always       *list.List
+	lock        *sync.Mutex
+	chIn, chOut chan *futureResult
+	//chOut                chan *futureResult
+	dones, fails, always *list.List
+	//fails        *list.List
+	//always       *list.List
 	pipeTask     func(v ...interface{}) *Future
 	pipeFuture   *Future
 	targetFuture *Future
