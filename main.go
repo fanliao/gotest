@@ -6,6 +6,7 @@ import (
 	//"log"
 	//"os"
 	//"runtime/pprof"
+	"errors"
 	"reflect"
 	"time"
 	"unsafe"
@@ -72,6 +73,31 @@ func main() {
 	////fmt.Println(s)
 
 	testChan()
+
+	c := make(chan int)
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				s, ok := err.(error)
+				if ok {
+					e := errors.New(s.Error())
+					fmt.Println(e.Error())
+				} else {
+					e := errors.New("")
+					fmt.Println(e.Error())
+				}
+			}
+
+		}()
+		c <- 1
+		time.Sleep(1 * time.Second)
+		c <- 2
+
+	}()
+
+	fmt.Println(<-c)
+	close(c)
+	time.Sleep(2 * time.Second)
 }
 
 func benchmarkFastRWerGet(n int) {

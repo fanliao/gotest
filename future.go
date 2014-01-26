@@ -1,9 +1,36 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
+)
+
+type stringer interface {
+	String() string
+}
+
+func getError(i interface{}) (e error) {
+	if i != nil {
+		switch v := i.(type) {
+		case error:
+			e = v
+		case stringer:
+			e = errors.New(v.String())
+		default:
+			e = errors.New("unknow error")
+		}
+	}
+	return
+}
+
+type callbackType int
+
+const (
+	CALLBACK_DONE callbackType = iota
+	CALLBACK_FAIL
+	CALLBACK_ALWAYS
 )
 
 //代表异步任务的结果
@@ -23,79 +50,56 @@ type Future struct {
 	r                    *futureResult
 }
 
-//Get函数将一直阻塞直到任务完成
-func (this *Future) Get() ([]interface{}, bool) {
-	if r, ok := <-this.chOut; ok {
-		return r.result, true
+//Get函数将一直阻塞直到任务完成,返回任务的结果
+//只能Get一次，多次Get将返回nil, false
+func (this *Future) Get() (r []interface{}, ok bool) {
+	if fr, ok := <-this.chOut; ok {
+		r = fr.result
 	} else {
-		return nil, false
+		r = nil
 	}
+	return
 }
 
-func (this *Future) Reslove(v ...interface{}) {
+//Reslove表示任务已经正常完成
+func (this *Future) Reslove(v ...interface{}) (e error) {
+	defer func() {
+		e = getError(recover())
+	}()
 	r := &futureResult{v, true}
 	this.chIn <- r
 	close(this.chIn)
+	e = nil
+	return
 }
 
-func (this *Future) Reject(v ...interface{}) {
+func (this *Future) Reject(v ...interface{}) (e error) {
+	defer func() {
+		e = getError(recover())
+	}()
 	r := &futureResult{v, false}
 	this.chIn <- r
 	close(this.chIn)
+	return
 }
 
 func (this *Future) Done(callback func(v ...interface{})) *Future {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-
-	if this.targetFuture != nil {
-		this.targetFuture.Done(callback)
-		return this
-	}
-	if this.r != nil {
-		if this.r.ok {
-			callback(this.r.result...)
-		}
-	} else {
-		this.dones = append(this.dones, callback)
-	}
+	this.handleOneCallback(callback, CALLBACK_DONE)
 	return this
 }
 
 func (this *Future) Fail(callback func(v ...interface{})) *Future {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	if this.targetFuture != nil {
-		this.targetFuture.Fail(callback)
-		return this
-	}
-	if this.r != nil {
-		if !this.r.ok {
-			callback(this.r.result...)
-		}
-	} else {
-		this.fails = append(this.fails, callback)
-	}
+	this.handleOneCallback(callback, CALLBACK_FAIL)
 	return this
 }
 
 func (this *Future) Always(callback func(v ...interface{})) *Future {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	if this.targetFuture != nil {
-		this.targetFuture.Always(callback)
-		return this
-	}
-	if this.r != nil {
-		callback(this.r.result...)
-	} else {
-		this.always = append(this.always, callback)
-	}
+	this.handleOneCallback(callback, CALLBACK_ALWAYS)
 	return this
 }
 
 //
-func (this *Future) Pipe(callback func(v ...interface{}) *Future) *Future {
+func (this *Future) Then(callback func(v ...interface{}) *Future) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	if this.r != nil {
@@ -112,54 +116,120 @@ func (this *Future) Pipe(callback func(v ...interface{}) *Future) *Future {
 
 func (this *Future) start() {
 	r := <-this.chIn
-	this.callback(r)
+	this.execCallback(r)
 	if this.pipeTask == nil {
 		this.chOut <- r
 	} else {
 		//下面触发pipe的Future任务，但如果在之后调用pipeFuture的Done, Fail, Always，如何处理？
-		f := this.pipeTask(this.r.result...)
+		target := this.pipeTask(this.r.result...)
 
-		forSlice(this.pipeFuture.dones, func(e func(v ...interface{})) { f.Done(e) })
-		forSlice(this.pipeFuture.fails, func(e func(v ...interface{})) { f.Fail(e) })
-		forSlice(this.pipeFuture.always, func(e func(v ...interface{})) { f.Always(e) })
-		this.pipeFuture.targetFuture = f
-		//f.Done(this.pipeFuture.dones...)
-		//f.Fail(this.pipeFuture.fails...)
-		//f.Always(this.pipeFuture.always...)
+		f := target.batchCallback(this.pipeFuture.dones, this.pipeFuture.fails, this.pipeFuture.always)
+		if f != nil {
+			f()
+		}
+		this.pipeFuture.targetFuture = target
 	}
 	close(this.chOut)
 	fmt.Println("is received")
 }
 
-func (this *Future) callback(r *futureResult) {
+func (this *Future) execCallback(r *futureResult) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.r = r
 	fmt.Println("callback")
+	execCallback(r, this.dones, this.fails, this.always)
+}
+
+func execCallback(r *futureResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
 
 	var callbacks []func(v ...interface{})
 	if r.ok {
-		callbacks = this.dones
-
+		callbacks = dones
 	} else {
-		callbacks = this.fails
+		callbacks = fails
 
 	}
-
-	/*forFuncs := func(s []func(v ...interface{})) {
-		for e := funcs.Front(); e != nil; e = e.Next() {
-			f := e.Value.(func(v ...interface{}))
-			f(r.result...)
-		}
-	}*/
 
 	forFs := func(s []func(v ...interface{})) {
 		forSlice(s, func(f func(v ...interface{})) { f(r.result...) })
 	}
 
 	forFs(callbacks)
-	forFs(this.always)
+	forFs(always)
 
+}
+
+func (this *Future) batchCallback(dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) func() {
+	proxyAction := func(t *Future) {
+		f := t.batchCallback(dones, fails, always)
+		if f != nil {
+			f()
+		}
+	}
+	pendingAction := func() {
+		this.dones = append(this.dones, dones...)
+		this.fails = append(this.fails, fails...)
+		this.always = append(this.always, always...)
+	}
+	finalAction := func(r *futureResult) {
+		execCallback(r, dones, fails, always)
+	}
+	return this.addCallback(proxyAction, pendingAction, finalAction)
+}
+
+func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbackType) {
+	f := this.addOneCallback(callback, CALLBACK_DONE)
+	if f != nil {
+		f()
+	}
+}
+
+func (this *Future) addOneCallback(callback func(v ...interface{}), t callbackType) func() {
+	proxyAction := func(target *Future) {
+		target.addOneCallback(callback, t)
+	}
+	pendingAction := func() {
+		switch t {
+		case CALLBACK_DONE:
+			this.dones = append(this.dones, callback)
+		case CALLBACK_FAIL:
+			this.fails = append(this.fails, callback)
+		case CALLBACK_ALWAYS:
+			this.always = append(this.always, callback)
+		}
+	}
+	finalAction := func(r *futureResult) {
+		if (t == CALLBACK_DONE && r.ok) ||
+			(t == CALLBACK_FAIL && !r.ok) ||
+			(t == CALLBACK_ALWAYS) {
+			callback(r.result...)
+		}
+	}
+	return this.addCallback(proxyAction, pendingAction, finalAction)
+}
+
+func (this *Future) addCallback(proxyAction func(*Future), pendingAction func(), finalAction func(*futureResult)) func() {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+
+	if this.targetFuture != nil {
+		target := this.targetFuture
+		return func() {
+			proxyAction(target)
+		}
+	}
+
+	if this.r == nil {
+		pendingAction()
+		//this.dones = append(this.dones, callback)
+		return nil
+	} else {
+		r := this.r
+		return func() {
+			finalAction(r)
+		}
+	}
 }
 
 func NewFuture() *Future {
@@ -173,6 +243,20 @@ func NewFuture() *Future {
 	go func() {
 		f.start()
 	}()
+	return f
+}
+
+func Any(fs ...*Future) *Future {
+	f := NewFuture()
+
+	for _, f := range fs {
+		f.Done(func(v ...interface{}) {
+			f.Reslove(v...)
+		}).Fail(func(v ...interface{}) {
+			f.Reject(v...)
+		})
+	}
+
 	return f
 }
 
