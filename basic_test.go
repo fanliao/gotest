@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io"
+	//"io"
 	"testing"
 )
 
@@ -27,5 +27,5 @@ func TestMultiReturn(t *testing.T) {
 	}
 
 	//同样不行
-	add1(io.WriteString(nil, ""))
+	//add1(io.WriteString(nil, ""))
 }

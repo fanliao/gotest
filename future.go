@@ -357,7 +357,7 @@ func task() *Future {
 	fmt.Println("end start")
 	return f
 }
-func testChan() {
+func testFuture() {
 	f := task()
 
 	fmt.Println("begin receive")

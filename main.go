@@ -72,7 +72,7 @@ func main() {
 	////s = nil
 	////fmt.Println(s)
 
-	testChan()
+	testFuture()
 
 	c := make(chan int)
 	go func() {
