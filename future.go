@@ -41,13 +41,13 @@ type futureResult struct {
 
 //Future代表一个异步任务
 type Future struct {
-	lock                 *sync.Mutex
-	chIn, chOut          chan *futureResult
-	dones, fails, always []func(v ...interface{})
-	pipeTask             func(v ...interface{}) *Future
-	pipeFuture           *Future
-	targetFuture         *Future
-	r                    *futureResult
+	lock                       *sync.Mutex
+	chIn, chOut                chan *futureResult
+	dones, fails, always       []func(v ...interface{})
+	pipeDoneTask, pipeFailTask func(v ...interface{}) *Future
+	pipeFuture                 *Future
+	targetFuture               *Future
+	r                          *futureResult
 }
 
 //Get函数将一直阻塞直到任务完成,返回任务的结果
@@ -61,7 +61,7 @@ func (this *Future) Get() (r []interface{}, ok bool) {
 	return
 }
 
-//Reslove表示任务已经正常完成
+//Reslove表示任务正常完成
 func (this *Future) Reslove(v ...interface{}) (e error) {
 	defer func() {
 		e = getError(recover())
@@ -73,6 +73,7 @@ func (this *Future) Reslove(v ...interface{}) (e error) {
 	return
 }
 
+//Reject表示任务失败
 func (this *Future) Reject(v ...interface{}) (e error) {
 	defer func() {
 		e = getError(recover())
@@ -83,56 +84,107 @@ func (this *Future) Reject(v ...interface{}) (e error) {
 	return
 }
 
+//添加一个任务成功完成的回调，如果任务已经成功完成，则直接执行回调函数
+//传递给Done函数的参数与Reslove函数的参数相同
 func (this *Future) Done(callback func(v ...interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_DONE)
 	return this
 }
 
+//添加一个任务失败的回调，如果任务已经失败，则直接执行回调函数
+//传递给Fail函数的参数与Reject函数的参数相同
 func (this *Future) Fail(callback func(v ...interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_FAIL)
 	return this
 }
 
+//添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
+//传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
 func (this *Future) Always(callback func(v ...interface{})) *Future {
 	this.handleOneCallback(callback, CALLBACK_ALWAYS)
 	return this
 }
 
-//
-func (this *Future) Then(callback func(v ...interface{}) *Future) *Future {
+//链式添加异步任务，可以同时定制Done或Fail状态下的链式异步任务，并返回一个新的异步对象。如果对此对象执行Done，Fail，Always操作，则新的回调函数将会被添加到链式的异步对象中
+//如果调用的参数超过2个，那第2个以后的参数将会被忽略
+func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) *Future {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+	if len(callbacks) == 0 ||
+		(len(callbacks) == 1 && callbacks[0] == nil) ||
+		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
+		return this
+	}
 	if this.r != nil {
-		this.pipeTask = callback
-		f := this.pipeTask(this.r.result...)
+		//this.pipeTasks = callbacks
+		f := this
+
+		if this.r.ok && callbacks[0] != nil {
+			f = (callbacks[0])(this.r.result...)
+		} else if !this.r.ok && len(callbacks) > 1 && callbacks[1] != nil {
+			f = (callbacks[1])(this.r.result...)
+		}
 		return f
 	} else {
-		this.pipeTask = callback
+		this.pipeDoneTask = callbacks[0]
+		if len(callbacks) > 1 {
+			this.pipeFailTask = callbacks[1]
+		}
 		this.pipeFuture = NewFuture()
 		return this.pipeFuture
 	}
 
 }
 
+//返回3个与链式调用相关的对象
+func (this *Future) getPipe() (func(v ...interface{}) *Future, func(v ...interface{}) *Future, *Future) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return this.pipeDoneTask, this.pipeFailTask, this.pipeFuture
+}
+
+//启动一个异步goroutine监控任务完成
 func (this *Future) start() {
 	r := <-this.chIn
-	this.execCallback(r)
-	if this.pipeTask == nil {
-		this.chOut <- r
-	} else {
-		//下面触发pipe的Future任务，但如果在之后调用pipeFuture的Done, Fail, Always，如何处理？
-		target := this.pipeTask(this.r.result...)
+	//任务完成后调用回调函数
+	this.setResult(r)
+	execCallback(r, this.dones, this.fails, this.always)
 
-		f := target.batchCallback(this.pipeFuture.dones, this.pipeFuture.fails, this.pipeFuture.always)
-		if f != nil {
-			f()
-		}
-		this.pipeFuture.targetFuture = target
-	}
+	//让Get函数可以返回
+	this.chOut <- r
 	close(this.chOut)
+
+	//处理链式异步任务
+	pipeDoneTask, pipeFailTask, pipeFuture := this.getPipe()
+	if pipeDoneTask != nil || pipeFailTask != nil {
+		//下面触发pipe的Future任务，但如果在之后调用pipeFuture的Done, Fail, Always，将直接转发到真正的Future对象
+		var target *Future
+		if r.ok && pipeDoneTask != nil {
+			target = pipeDoneTask(r.result...)
+		} else if !r.ok && pipeFailTask != nil {
+			target = pipeFailTask(r.result...)
+		}
+		//target := this.pipeTask(this.r.result...)
+
+		if target != nil {
+			f := target.batchCallback(this.pipeFuture.dones, this.pipeFuture.fails, this.pipeFuture.always)
+			if f != nil {
+				f()
+			}
+			pipeFuture.targetFuture = target
+		}
+	}
 	fmt.Println("is received")
 }
 
+//set this.r
+func (this *Future) setResult(r *futureResult) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.r = r
+}
+
+//执行回调函数，利用lock保证访问this.r是线程安全的
 func (this *Future) execCallback(r *futureResult) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
@@ -141,6 +193,7 @@ func (this *Future) execCallback(r *futureResult) {
 	execCallback(r, this.dones, this.fails, this.always)
 }
 
+//执行回调函数
 func execCallback(r *futureResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
 
 	var callbacks []func(v ...interface{})
@@ -160,6 +213,7 @@ func execCallback(r *futureResult, dones []func(v ...interface{}), fails []func(
 
 }
 
+//批量添加回调函数
 func (this *Future) batchCallback(dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) func() {
 	proxyAction := func(t *Future) {
 		f := t.batchCallback(dones, fails, always)
@@ -178,6 +232,7 @@ func (this *Future) batchCallback(dones []func(v ...interface{}), fails []func(v
 	return this.addCallback(proxyAction, pendingAction, finalAction)
 }
 
+//处理单个回调函数的添加请求
 func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbackType) {
 	f := this.addOneCallback(callback, CALLBACK_DONE)
 	if f != nil {
@@ -185,6 +240,7 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 	}
 }
 
+//添加一个回调函数
 func (this *Future) addOneCallback(callback func(v ...interface{}), t callbackType) func() {
 	proxyAction := func(target *Future) {
 		target.addOneCallback(callback, t)
@@ -209,6 +265,7 @@ func (this *Future) addOneCallback(callback func(v ...interface{}), t callbackTy
 	return this.addCallback(proxyAction, pendingAction, finalAction)
 }
 
+//添加回调函数的框架函数
 func (this *Future) addCallback(proxyAction func(*Future), pendingAction func(), finalAction func(*futureResult)) func() {
 	this.lock.Lock()
 	defer this.lock.Unlock()
@@ -232,6 +289,7 @@ func (this *Future) addCallback(proxyAction func(*Future), pendingAction func(),
 	}
 }
 
+//Factory function for future
 func NewFuture() *Future {
 	f := &Future{new(sync.Mutex),
 		make(chan *futureResult, 1),
@@ -239,13 +297,14 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
-		nil, nil, nil, nil}
+		nil, nil, nil, nil, nil}
 	go func() {
 		f.start()
 	}()
 	return f
 }
 
+//产生一个新的Future，如果列表中任意1个Future完成，则Future完成
 func Any(fs ...*Future) *Future {
 	f := NewFuture()
 
@@ -260,6 +319,7 @@ func Any(fs ...*Future) *Future {
 	return f
 }
 
+//产生一个新的Future，如果列表中所有Future都成功完成，则Future成功完成，否则失败
 func When(fs ...*Future) *Future {
 	f := NewFuture()
 	go func() {
