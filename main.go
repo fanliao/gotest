@@ -165,13 +165,15 @@ func testCompare() {
 	}
 	m1 := make(map[int]int)
 	m2 := make(map[int]int)
+	m3 := map[int]int{1: 1, 2: 2}
+	m4 := map[int]int{1: 1, 2: 2}
 	arr1 := [2]int{1, 2}
 	arr2 := [2]int{1, 2}
 	ch := make(chan int)
 	sl1 := []int{1, 2}
 	sl2 := []int{1, 2}
 	var i interface{} = m1
-	testdatas := [][]interface{}{{"a", "a"}, {1, 1}, {arr1, arr2}, {m1, m2}, {f, f}, {sl1, sl2}, {ch, ch}, {&m1, &m2}, {i, i}, {st1{}, st1{}}, {st2{}, st2{}}}
+	testdatas := [][]interface{}{{"a", "a"}, {1, 1}, {arr1, arr2}, {m1, m2}, {m3, m4}, {f, f}, {sl1, sl2}, {ch, ch}, {&m1, &m2}, {i, i}, {st1{}, st1{}}, {st2{}, st2{}}}
 	for i, d := range testdatas {
 		r := func(a interface{}, b interface{}) (r bool) {
 			defer func() {
@@ -180,7 +182,8 @@ func testCompare() {
 					r = false
 				}
 			}()
-			r = a == b
+			//r = a == b
+			r = compare(a, b)
 			return
 		}(d[0], d[1])
 		fmt.Println(reflect.TypeOf(d[0]), d[0], "=", d[1], r)
