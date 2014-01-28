@@ -74,6 +74,8 @@ func main() {
 
 	testFuture()
 
+	testCompare()
+
 	c := make(chan int)
 	go func() {
 		defer func() {
@@ -146,4 +148,46 @@ func benchmarkFastRWerSetValueByName() {
 	rw.SetValueByName(p, "Date", date)
 	rw.SetValueByName(p, "Ptr", ptr)
 	//}
+}
+
+type st1 struct {
+	a int
+}
+
+type st2 struct {
+	a int
+	b map[int]int
+}
+
+func testCompare() {
+	f := func() {
+
+	}
+	m1 := make(map[int]int)
+	m2 := make(map[int]int)
+	arr1 := [2]int{1, 2}
+	arr2 := [2]int{1, 2}
+	ch := make(chan int)
+	sl1 := []int{1, 2}
+	sl2 := []int{1, 2}
+	var i interface{} = m1
+	testdatas := [][]interface{}{{"a", "a"}, {1, 1}, {arr1, arr2}, {m1, m2}, {f, f}, {sl1, sl2}, {ch, ch}, {&m1, &m2}, {i, i}, {st1{}, st1{}}, {st2{}, st2{}}}
+	for i, d := range testdatas {
+		r := func(a interface{}, b interface{}) (r bool) {
+			defer func() {
+				if e := recover(); e != nil {
+					fmt.Println(e)
+					r = false
+				}
+			}()
+			r = a == b
+			return
+		}(d[0], d[1])
+		fmt.Println(reflect.TypeOf(d[0]), d[0], "=", d[1], r)
+		fmt.Println(i, d)
+		fmt.Println()
+	}
+	//测试结果：
+	//uncomparable type：map, func, slice, 以及包含这些类型的struct
+	//其他类型可以比较，并且比较的是变量的byte数组内容，所以2个不同的数组只要内容相同就是相等
 }
