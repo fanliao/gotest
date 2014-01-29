@@ -74,7 +74,9 @@ func main() {
 
 	testFuture()
 
+	//testStructUnsafeCode()
 	testCompare()
+	//testSetUnexported()
 
 	c := make(chan int)
 	go func() {
@@ -150,13 +152,54 @@ func benchmarkFastRWerSetValueByName() {
 	//}
 }
 
+type st struct {
+	a int
+}
+
 type st1 struct {
 	a int
+	b int
 }
 
 type st2 struct {
 	a int
 	b map[int]int
+}
+
+func testSetUnexported() {
+	st11 := st1{2, 3454}
+	//panic: reflect.Value.UnsafeAddr of unaddressable value
+	aOffset := reflect.ValueOf(st11).Field(1).UnsafeAddr()
+	pint := (*int)(unsafe.Pointer(aOffset))
+	*pint = 110
+	fmt.Println(st11)
+}
+
+func testStructUnsafeCode() {
+	st11 := st1{2, 3454}
+	st12 := st1{2, 3454}
+	fmt.Println("st", uintptr(unsafe.Pointer(&st11)), uintptr(unsafe.Pointer(&st12)))
+	var i1, i2 interface{}
+	i1, i2 = st11, st12
+	fmt.Println(*((*interfaceHeader1)(unsafe.Pointer(&i1))),
+		*((*interfaceHeader1)(unsafe.Pointer(&i2))))
+	word1 := (*((*interfaceHeader1)(unsafe.Pointer(&i1)))).word
+	ptr1 := uintptr(unsafe.Pointer(&st11))
+	for i := 0; uintptr(i) < unsafe.Sizeof(st11); i++ {
+		fmt.Println(*((*byte)(unsafe.Pointer(ptr1 + uintptr(i)))))
+	}
+	fmt.Println(*((*st1)(unsafe.Pointer(word1))))
+	fmt.Println(i1, i2)
+	fmt.Println()
+
+	fmt.Println("direct compare struct")
+	ptr := InterfaceToPtr1(st11)
+	fmt.Println(ptr)
+	for i := 0; uintptr(i) < unsafe.Sizeof(st11); i++ {
+		fmt.Println(*((*byte)(unsafe.Pointer(ptr + uintptr(i)))))
+	}
+
+	fmt.Println()
 }
 
 func testCompare() {
@@ -173,23 +216,51 @@ func testCompare() {
 	sl1 := []int{1, 2}
 	sl2 := []int{1, 2}
 	var i interface{} = m1
-	testdatas := [][]interface{}{{"a", "a"}, {1, 1}, {arr1, arr2}, {m1, m2}, {m3, m4}, {f, f}, {sl1, sl2}, {ch, ch}, {&m1, &m2}, {i, i}, {st1{}, st1{}}, {st2{}, st2{}}}
+	st11 := st1{2, 3454}
+	st12 := st1{2, 3454}
+	fmt.Println("st", uintptr(unsafe.Pointer(&st11)), uintptr(unsafe.Pointer(&st12)))
+	var i1, i2 interface{}
+	i1, i2 = st11, st12
+	fmt.Println(*((*interfaceHeader1)(unsafe.Pointer(&i1))),
+		*((*interfaceHeader1)(unsafe.Pointer(&i2))))
+	word1 := (*((*interfaceHeader1)(unsafe.Pointer(&i1)))).word
+	fmt.Println(*((*st1)(unsafe.Pointer(word1))))
+	fmt.Println(i1, i2)
+	testdatas := [][]interface{}{
+		{"a", "a"},
+		{1, 1},
+		{arr1, arr2},
+		{m1, m2},
+		{m3, m4},
+		{f, f},
+		{sl1, sl2},
+		{ch, ch},
+		{&m1, &m2},
+		{i, i},
+		{st{64}, st{64}},
+		{st11, st12},
+		{st2{1, m1}, st2{1, m1}},
+		{st2{1, m1}, st2{1, m2}},
+		{&st11, &st12},
+	}
+	f1 := func(a interface{}, b interface{}) (r bool) {
+		defer func() {
+			if e := recover(); e != nil {
+				fmt.Println(e)
+				r = false
+			}
+		}()
+		//r = a == b
+		r = compare(a, b)
+		return
+	}
 	for i, d := range testdatas {
-		r := func(a interface{}, b interface{}) (r bool) {
-			defer func() {
-				if e := recover(); e != nil {
-					fmt.Println(e)
-					r = false
-				}
-			}()
-			//r = a == b
-			r = compare(a, b)
-			return
-		}(d[0], d[1])
+		r := f1(d[0], d[1])
 		fmt.Println(reflect.TypeOf(d[0]), d[0], "=", d[1], r)
 		fmt.Println(i, d)
 		fmt.Println()
 	}
+
 	//测试结果：
 	//uncomparable type：map, func, slice, 以及包含这些类型的struct
 	//其他类型可以比较，并且比较的是变量的byte数组内容，所以2个不同的数组只要内容相同就是相等
