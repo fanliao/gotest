@@ -8,6 +8,8 @@ import (
 	"unsafe"
 )
 
+const ptrSize = unsafe.Sizeof((*byte)(nil))
+
 type metaCache struct {
 	lock  *sync.RWMutex
 	metas map[reflect.Type]*FastRW
@@ -90,15 +92,19 @@ func (this *FastRW) SetPtrByName(obj unsafe.Pointer, fieldName string, source ui
 
 func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
 	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
-	addr := uintptr(unsafe.Pointer(&source))
-	copyVar(target, addr, this.FieldSizeByIndex[i])
+	size := this.FieldSizeByIndex[i]
+	dataPtr := InterfaceToDataPtr(reflect.Indirect(reflect.ValueOf(source)).Interface())
+	if size > ptrSize {
+		copyVar(target, dataPtr, size)
+	} else {
+		copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
+	}
+	_ = target
 }
 
 func (this *FastRW) SetValueByName(obj unsafe.Pointer, fieldName string, source interface{}) {
 	i := this.FieldIndexsByName[fieldName]
-	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
-	addr := uintptr(unsafe.Pointer(&source))
-	copyVar(target, addr, this.FieldSizeByIndex[i])
+	this.SetValue(obj, i, source)
 }
 
 func FastGet(obj unsafe.Pointer, this *FastRW, i int) unsafe.Pointer {
@@ -157,7 +163,7 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 	//fmt.Println("target=", target, " source=", source)
 	switch size {
 	case 1:
-		*((*[1]byte)(unsafe.Pointer(target))) = *((*[1]byte)(unsafe.Pointer(source)))
+		*((*byte)(unsafe.Pointer(target))) = *((*byte)(unsafe.Pointer(source)))
 	case 2:
 		*((*[2]byte)(unsafe.Pointer(target))) = *((*[2]byte)(unsafe.Pointer(source)))
 	case 3:
@@ -206,6 +212,9 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 			}
 		}
 	}
+	//for i := 0; uintptr(i) < size; i++ {
+	//	*((*byte)(unsafe.Pointer(target + uintptr(i)))) = *((*byte)(unsafe.Pointer(source + uintptr(i))))
+	//}
 }
 
 func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
@@ -256,14 +265,38 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 
 // interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
 type interfaceHeader struct {
-	typ  unsafe.Pointer
-	word unsafe.Pointer
+	typ  *rtype
+	word uintptr
 }
 
-func InterfaceToPtr(i interface{}) unsafe.Pointer {
-	s := *(*interfaceHeader)(unsafe.Pointer(&i))
+func InterfaceToDataPtr(i interface{}) uintptr {
+	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
 	return s.word
 }
+
+// rtype is the common implementation of most values.
+// It is embedded in other, public struct types, but always
+// with a unique tag like `reflect:"array"` or `reflect:"ptr"`
+// so that code cannot convert from, say, *arrayType to *ptrType.
+type rtype struct {
+	size       uintptr        // size in bytes
+	hash       uint32         // hash of type; avoids computation in hash tables
+	_          uint8          // unused/padding
+	align      uint8          // alignment of variable with this type
+	fieldAlign uint8          // alignment of struct field with this type
+	kind       uint8          // enumeration for C
+	alg        *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
+	gc         unsafe.Pointer // garbage collection data
+	string     *string        // string form; unnecessary but undeniably useful
+	//*uncommonType                // (relatively) uncommon fields
+	//ptrToThis     *rtype         // type for pointer to this type, if used in binary or has methods
+}
+
+//func InterfaceToBytes(i interface{}, size int) []byte{
+//	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
+//	data := make([]byte, size, size)
+//	return *((*complex128)(ptr))
+//}
 
 //func InterfaceToSliceHeader(i interface{}) unsafe.SliceHeader {
 //	p := InterfaceToPtr(i)

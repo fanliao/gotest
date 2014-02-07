@@ -409,7 +409,7 @@ func BenchmarkFastRWerSetPtr(b *testing.B) {
 }
 
 func BenchmarkFastRWerSetValue(b *testing.B) {
-	o := &RWTestStruct{1, "test", 1.1, time.Now(), nil}
+	o := &RWTestStruct{13, "test", 1.1, time.Now(), nil}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 
@@ -418,11 +418,12 @@ func BenchmarkFastRWerSetValue(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rw.SetValue(p, 0, id)
-		rw.SetValue(p, 1, name)
+		rw.SetValue(p, 1, &name)
 		rw.SetValue(p, 2, cash)
-		rw.SetValue(p, 3, date)
+		rw.SetValue(p, 3, &date)
 		rw.SetValue(p, 4, ptr)
 	}
+	b.Log(o)
 }
 
 func BenchmarkFastSet(b *testing.B) {

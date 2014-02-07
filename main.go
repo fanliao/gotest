@@ -12,8 +12,6 @@ import (
 	"unsafe"
 )
 
-const ptrSize int = int(unsafe.Sizeof(int(0)))
-
 type RWTestStruct1 struct {
 	Id1   int
 	Name1 string
@@ -218,30 +216,27 @@ func testCompare() {
 	var i interface{} = m1
 	st11 := st1{2, 3454}
 	st12 := st1{2, 3454}
-	fmt.Println("st", uintptr(unsafe.Pointer(&st11)), uintptr(unsafe.Pointer(&st12)))
-	var i1, i2 interface{}
-	i1, i2 = st11, st12
-	fmt.Println(*((*interfaceHeader1)(unsafe.Pointer(&i1))),
-		*((*interfaceHeader1)(unsafe.Pointer(&i2))))
-	word1 := (*((*interfaceHeader1)(unsafe.Pointer(&i1)))).word
-	fmt.Println(*((*st1)(unsafe.Pointer(word1))))
-	fmt.Println(i1, i2)
+
 	testdatas := [][]interface{}{
-		{"a", "a"},
-		{1, 1},
-		{arr1, arr2},
-		{m1, m2},
-		{m3, m4},
-		{f, f},
-		{sl1, sl2},
-		{ch, ch},
-		{&m1, &m2},
-		{i, i},
-		{st{64}, st{64}},
-		{st11, st12},
-		{st2{1, m1}, st2{1, m1}},
-		{st2{1, m1}, st2{1, m2}},
-		{&st11, &st12},
+		{nil, nil, true},
+		{nil, "a", false},
+		{"a", "a", true},
+		{1, "1", false},
+		{1, 1, true},
+		{arr1, arr2, true},
+		{m1, m2, true},
+		{m3, m4, true},
+		{f, f, true},
+		{sl1, sl2, true},
+		{ch, ch, true},
+		{&m1, &m2, false},
+		{&m1, &m1, true},
+		{i, i, true},
+		{st{64}, st{64}, true},
+		{st11, st12, true},
+		{st2{1, m1}, st2{1, m1}, true},
+		{st2{1, m1}, st2{1, m2}, false},
+		{&st11, &st12, false},
 	}
 	f1 := func(a interface{}, b interface{}) (r bool) {
 		defer func() {
@@ -251,13 +246,13 @@ func testCompare() {
 			}
 		}()
 		//r = a == b
-		r = compare(a, b)
+		r = Compare(a, b)
 		return
 	}
 	for i, d := range testdatas {
 		r := f1(d[0], d[1])
-		fmt.Println(reflect.TypeOf(d[0]), d[0], "=", d[1], r)
-		fmt.Println(i, d)
+		fmt.Println(i, reflect.TypeOf(d[0]), d[0], "=", d[1], r)
+		AreSame(r, d[2], nil)
 		fmt.Println()
 	}
 

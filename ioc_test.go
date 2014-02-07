@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-type tester interface {
+type test1er interface {
 	Get() string
 }
 
