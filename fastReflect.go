@@ -93,13 +93,23 @@ func (this *FastRW) SetPtrByName(obj unsafe.Pointer, fieldName string, source ui
 func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
 	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
 	size := this.FieldSizeByIndex[i]
-	dataPtr := InterfaceToDataPtr(reflect.Indirect(reflect.ValueOf(source)).Interface())
+
+	s := *((*interfaceHeader)(unsafe.Pointer(&source)))
+	t := s.typ
+	var dataPtr uintptr
+	if t.Kind() == reflect.Ptr || t.size > ptrSize {
+		//如果i是指针或者i的长度超过了一个字的长度，则s.word是一个指向数据的指针
+		dataPtr = s.word
+	} else {
+		dataPtr = s.word
+	}
+
 	if size > ptrSize {
 		copyVar(target, dataPtr, size)
 	} else {
 		copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
 	}
-	_ = target
+	_, _, _ = dataPtr, target, size
 }
 
 func (this *FastRW) SetValueByName(obj unsafe.Pointer, fieldName string, source interface{}) {
@@ -157,6 +167,13 @@ func GetFastRWer(obj interface{}) *FastRW {
 //factory function
 func newFastRWImpl(meta structMeta) *FastRW {
 	return &FastRW{meta}
+}
+
+func copyUint(target uintptr, source uintptr, size uintptr) {
+	//sourceAddr := uintptr()
+	//for i := 0; i < size; i++{
+	//    *((*byte)(unsafe.Pointer(target + i))) = *((*byte)(unsafe.Pointer(source)))
+	//}
 }
 
 func copyVar(target uintptr, source uintptr, size uintptr) {
@@ -263,6 +280,14 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 	}
 }
 
+//from type.go
+// High bit says whether type has
+// embedded pointers,to help garbage collector.
+const (
+	kindMask       = 0x7f
+	kindNoPointers = 0x80
+)
+
 // interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
 type interfaceHeader struct {
 	typ  *rtype
@@ -279,18 +304,20 @@ func InterfaceToDataPtr(i interface{}) uintptr {
 // with a unique tag like `reflect:"array"` or `reflect:"ptr"`
 // so that code cannot convert from, say, *arrayType to *ptrType.
 type rtype struct {
-	size       uintptr        // size in bytes
-	hash       uint32         // hash of type; avoids computation in hash tables
-	_          uint8          // unused/padding
-	align      uint8          // alignment of variable with this type
-	fieldAlign uint8          // alignment of struct field with this type
-	kind       uint8          // enumeration for C
-	alg        *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
-	gc         unsafe.Pointer // garbage collection data
-	string     *string        // string form; unnecessary but undeniably useful
-	//*uncommonType                // (relatively) uncommon fields
-	//ptrToThis     *rtype         // type for pointer to this type, if used in binary or has methods
+	size              uintptr        // size in bytes
+	hash              uint32         // hash of type; avoids computation in hash tables
+	_                 uint8          // unused/padding
+	align             uint8          // alignment of variable with this type
+	fieldAlign        uint8          // alignment of struct field with this type
+	kind              uint8          // enumeration for C
+	alg               *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
+	gc                unsafe.Pointer // garbage collection data
+	string            *string        // string form; unnecessary but undeniably useful
+	ptrToUncommonType uintptr        // (relatively) uncommon fields
+	ptrToThis         *rtype         // type for pointer to this type, if used in binary or has methods
 }
+
+func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
 
 //func InterfaceToBytes(i interface{}, size int) []byte{
 //	s := *((*interfaceHeader)(unsafe.Pointer(&i)))

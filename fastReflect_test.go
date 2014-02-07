@@ -447,7 +447,7 @@ func BenchmarkFastSet(b *testing.B) {
 		FastSet(p, rw, 4, ptrAddr)
 	}
 	b.StopTimer()
-	//b.Log(o.Id, o.Name)
+	b.Log(o.Id, o.Name)
 }
 
 func BenchmarkCopyVar(b *testing.B) {
