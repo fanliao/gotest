@@ -8,6 +8,8 @@ import (
 	"unsafe"
 )
 
+const ptrSize = unsafe.Sizeof((*byte)(nil))
+
 var bigEndian bool
 
 func init() {
@@ -24,8 +26,6 @@ func init() {
 
 }
 
-const ptrSize = unsafe.Sizeof((*byte)(nil))
-
 type metaCache struct {
 	lock  *sync.RWMutex
 	metas map[reflect.Type]*FastRW
@@ -37,7 +37,7 @@ type structMeta struct {
 	FieldOffsetsByIndex []uintptr
 	FieldNamesByIndex   []string
 	FieldSizeByIndex    []uintptr
-	FieldTypesByIndex   []reflect.Type
+	FieldTypesByIndex   []*reflect.Type
 }
 
 //FastRWer implement class
@@ -123,7 +123,7 @@ func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
 	//	dataPtr = s.word
 	//}
 	//fmt.Println(t.Kind(), size, t.size, dataPtr)
-	ft := this.FieldTypesByIndex[i]
+	ft := *(this.FieldTypesByIndex[i])
 	if ft.Kind() == reflect.Ptr && t.Kind() == reflect.Ptr {
 		//如果字段是指针类型，则直接copy原指针指向的地址
 		copyUint(target, dataPtr, size)
@@ -172,7 +172,7 @@ func GetFastRWer(obj interface{}) *FastRW {
 		meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
 		meta.FieldNamesByIndex = make([]string, numField, numField)
 		meta.FieldSizeByIndex = make([]uintptr, numField, numField)
-		meta.FieldTypesByIndex = make([]reflect.Type, numField, numField)
+		meta.FieldTypesByIndex = make([]*reflect.Type, numField, numField)
 		for i := 0; i < t.NumField(); i++ {
 			fType := t.Field(i)
 			f := v.Field(i)
@@ -181,7 +181,8 @@ func GetFastRWer(obj interface{}) *FastRW {
 			meta.FieldNamesByIndex[i] = fType.Name
 			meta.FieldSizeByIndex[i] = f.Type().Size()
 			//fmt.Println(f.Type().Size(), f.Type().Name(), fType.Type.Size())
-			meta.FieldTypesByIndex[i] = f.Type()
+			t := f.Type()
+			meta.FieldTypesByIndex[i] = &t
 			//v := f.Interface()
 		}
 
@@ -233,37 +234,21 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 		*((*[7]byte)(unsafe.Pointer(target))) = *((*[7]byte)(unsafe.Pointer(source)))
 	case 8:
 		*((*[8]byte)(unsafe.Pointer(target))) = *((*[8]byte)(unsafe.Pointer(source)))
-	case 9:
-		*((*[9]byte)(unsafe.Pointer(target))) = *((*[9]byte)(unsafe.Pointer(source)))
-	case 10:
-		*((*[10]byte)(unsafe.Pointer(target))) = *((*[10]byte)(unsafe.Pointer(source)))
-	case 11:
-		*((*[11]byte)(unsafe.Pointer(target))) = *((*[11]byte)(unsafe.Pointer(source)))
-	case 12:
-		*((*[12]byte)(unsafe.Pointer(target))) = *((*[12]byte)(unsafe.Pointer(source)))
-	case 13:
-		*((*[13]byte)(unsafe.Pointer(target))) = *((*[13]byte)(unsafe.Pointer(source)))
-	case 14:
-		*((*[14]byte)(unsafe.Pointer(target))) = *((*[14]byte)(unsafe.Pointer(source)))
-	case 15:
-		*((*[15]byte)(unsafe.Pointer(target))) = *((*[15]byte)(unsafe.Pointer(source)))
 	case 16:
 		*((*[16]byte)(unsafe.Pointer(target))) = *((*[16]byte)(unsafe.Pointer(source)))
-	case 24:
-		*((*[24]byte)(unsafe.Pointer(target))) = *((*[24]byte)(unsafe.Pointer(source)))
 	default:
 		unWriteSize := size
 		targetAddr := target
 		sourceAddr := source
 		for {
-			if unWriteSize <= 16 || unWriteSize == 24 {
+			if unWriteSize <= 8 || unWriteSize == 16 {
 				copyVar(targetAddr, sourceAddr, unWriteSize)
 				return
 			} else {
-				*((*[16]byte)(unsafe.Pointer(targetAddr))) = *((*[16]byte)(unsafe.Pointer(sourceAddr)))
-				targetAddr += 16
-				sourceAddr += 16
-				unWriteSize -= 16
+				*((*[8]byte)(unsafe.Pointer(targetAddr))) = *((*[8]byte)(unsafe.Pointer(sourceAddr)))
+				targetAddr += 8
+				sourceAddr += 8
+				unWriteSize -= 8
 			}
 		}
 	}
@@ -272,8 +257,9 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 	//}
 }
 
-func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
-	switch typ.Kind() {
+func getValue(typ *reflect.Type, ptr unsafe.Pointer) interface{} {
+	t := *typ
+	switch t.Kind() {
 	case reflect.Bool:
 		return *((*bool)(ptr))
 	case reflect.Int:
@@ -307,14 +293,14 @@ func getValue(typ reflect.Type, ptr unsafe.Pointer) interface{} {
 	case reflect.String:
 		return *((*string)(ptr))
 	case reflect.Struct:
-		if typ == dateType {
+		if t == dateType {
 			//fmt.Println("use *time")
 			return *((*time.Time)(ptr))
 		} else {
-			return reflect.NewAt(typ, ptr).Elem().Interface()
+			return reflect.NewAt(t, ptr).Elem().Interface()
 		}
 	default:
-		return reflect.NewAt(typ, ptr).Elem().Interface()
+		return reflect.NewAt(t, ptr).Elem().Interface()
 	}
 }
 
@@ -356,15 +342,3 @@ type rtype struct {
 }
 
 func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
-
-//func InterfaceToBytes(i interface{}, size int) []byte{
-//	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
-//	data := make([]byte, size, size)
-//	return *((*complex128)(ptr))
-//}
-
-//func InterfaceToSliceHeader(i interface{}) unsafe.SliceHeader {
-//	p := InterfaceToPtr(i)
-//	s := *(*SliceHeader)(p)
-//	return s
-//}
