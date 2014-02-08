@@ -1,12 +1,28 @@
 package main
 
 import (
-	//"fmt"
+	//	"fmt"
 	"reflect"
 	"sync"
 	"time"
 	"unsafe"
 )
+
+var bigEndian bool
+
+func init() {
+	x := 0x1234
+	p := unsafe.Pointer(&x)
+	p2 := (*[ptrSize]byte)(p)
+	if p2[0] == 0 {
+		//fmt.Println("本机器：大端")
+		bigEndian = true
+	} else {
+		//fmt.Println("本机器：小端")
+		bigEndian = false
+	}
+
+}
 
 const ptrSize = unsafe.Sizeof((*byte)(nil))
 
@@ -85,36 +101,47 @@ func (this *FastRW) SetPtr(obj unsafe.Pointer, i int, source uintptr) {
 }
 
 func (this *FastRW) SetPtrByName(obj unsafe.Pointer, fieldName string, source uintptr) {
-	i := this.FieldIndexsByName[fieldName]
-	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
-	copyVar(target, source, this.FieldSizeByIndex[i])
+	if i, isExist := this.FieldIndexsByName[fieldName]; isExist {
+		target := uintptr(obj) + this.FieldOffsetsByIndex[i]
+		copyVar(target, source, this.FieldSizeByIndex[i])
+	}
 }
 
 func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
+	//fmt.Println("SetValue", source)
+	//fmt.Println(*((*interfaceHeader)(unsafe.Pointer(&source))))
 	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
 	size := this.FieldSizeByIndex[i]
 
+	var dataPtr uintptr = 0
+	//if source != nil {
 	s := *((*interfaceHeader)(unsafe.Pointer(&source)))
 	t := s.typ
-	var dataPtr uintptr
-	if t.Kind() == reflect.Ptr || t.size > ptrSize {
+	//if t.Kind() == reflect.Ptr || t.size > ptrSize {
+	dataPtr = s.word
+	//} else {
+	//	dataPtr = s.word
+	//}
+	//fmt.Println(t.Kind(), size, t.size, dataPtr)
+	ft := this.FieldTypesByIndex[i]
+	if ft.Kind() == reflect.Ptr && t.Kind() == reflect.Ptr {
+		//如果字段是指针类型，则直接copy原指针指向的地址
+		copyUint(target, dataPtr, size)
+	} else if (t.Kind() == reflect.Ptr && dataPtr != 0) || t.size > ptrSize {
 		//如果i是指针或者i的长度超过了一个字的长度，则s.word是一个指向数据的指针
-		dataPtr = s.word
-	} else {
-		dataPtr = s.word
-	}
-
-	if size > ptrSize {
 		copyVar(target, dataPtr, size)
 	} else {
-		copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
+		//copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
+		copyUint(target, dataPtr, size)
 	}
-	_, _, _ = dataPtr, target, size
+	//_, _, _ = dataPtr, target, size
 }
 
 func (this *FastRW) SetValueByName(obj unsafe.Pointer, fieldName string, source interface{}) {
-	i := this.FieldIndexsByName[fieldName]
-	this.SetValue(obj, i, source)
+	if i, isExist := this.FieldIndexsByName[fieldName]; isExist {
+		//fmt.Println(*((*interfaceHeader)(unsafe.Pointer(&source))))
+		this.SetValue(obj, i, source)
+	}
 }
 
 func FastGet(obj unsafe.Pointer, this *FastRW, i int) unsafe.Pointer {
@@ -153,6 +180,7 @@ func GetFastRWer(obj interface{}) *FastRW {
 			meta.FieldIndexsByName[fType.Name] = i
 			meta.FieldNamesByIndex[i] = fType.Name
 			meta.FieldSizeByIndex[i] = f.Type().Size()
+			//fmt.Println(f.Type().Size(), f.Type().Name(), fType.Type.Size())
 			meta.FieldTypesByIndex[i] = f.Type()
 			//v := f.Interface()
 		}
@@ -171,9 +199,19 @@ func newFastRWImpl(meta structMeta) *FastRW {
 
 func copyUint(target uintptr, source uintptr, size uintptr) {
 	//sourceAddr := uintptr()
-	//for i := 0; i < size; i++{
-	//    *((*byte)(unsafe.Pointer(target + i))) = *((*byte)(unsafe.Pointer(source)))
-	//}
+	//fmt.Printf("十六进制：%X\n", source)
+	//fmt.Printf("十进制：%d\n", source)
+	var i uintptr
+	for i = 0; i < size; i++ {
+		//fmt.Printf("十六进制：%X\n", (byte)((source>>((size-1-i)*8))&0xff))
+		if bigEndian {
+			*((*byte)(unsafe.Pointer(target + i))) = (byte)((source >> ((size - 1 - i) * 8)) & 0xff)
+		} else {
+			*((*byte)(unsafe.Pointer(target + i))) = (byte)((source >> ((i) * 8)) & 0xff)
+		}
+	}
+	//fmt.Printf("十六进制结果：：%X\n", *((*int32)(unsafe.Pointer(target))))
+	//fmt.Printf("十进制结果：%d\n", *((*int32)(unsafe.Pointer(target))))
 }
 
 func copyVar(target uintptr, source uintptr, size uintptr) {

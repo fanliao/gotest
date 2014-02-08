@@ -56,6 +56,9 @@ func main() {
 	benchmarkFastRWerSetValueByName()
 	flag.Parse()
 
+	f := 22.22
+	fmt.Printf("float64 二进制：%b\n", f)
+	fmt.Printf("float32 二进制：%b\n", float32(f))
 	////if *cpuprofile != "" {
 	//f, err := os.Create("profile_file")
 	//if err != nil {
@@ -70,10 +73,10 @@ func main() {
 	////s = nil
 	////fmt.Println(s)
 
-	testFuture()
+	//testFuture()
 
 	//testStructUnsafeCode()
-	testCompare()
+	//testCompare()
 	//testSetUnexported()
 
 	c := make(chan int)
@@ -136,18 +139,24 @@ func benchmarkFastRWerSetValueByName() {
 	rw := GetFastRWer(o)
 	id := 1111111
 	name := "test unsafe set, great!"
-	cash := 22.22
+	var cash float64 = 22.22
 	date := time.Now()
 	ptr := &RWTestStruct1{1, "test"}
-	//b.ResetTimer()
-	//for i := 0; i < b.N; i++ {
+
+	//rw.SetValue(p, 0, id)
+	//rw.SetValue(p, 1, &name)
+	//rw.SetValue(p, 2, cash)
+	//rw.SetValue(p, 3, &date)
+	//rw.SetValue(p, 4, ptr)
+
 	rw.SetValueByName(p, "Id", id)
-	rw.SetValueByName(p, "Name", name)
-	rw.SetValueByName(p, "Cash", cash)
-	fmt.Println("SetValueByName", uintptr(p), date, uintptr(unsafe.Pointer(&date)))
-	rw.SetValueByName(p, "Date", date)
+	rw.SetValueByName(p, "Name", &name)
+	rw.SetValueByName(p, "Cash", float32(cash))
+	rw.SetValueByName(p, "Date", &date)
 	rw.SetValueByName(p, "Ptr", ptr)
-	//}
+
+	fmt.Println("SetValueByName", o)
+
 }
 
 type st struct {

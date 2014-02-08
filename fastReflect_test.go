@@ -406,6 +406,7 @@ func BenchmarkFastRWerSetPtr(b *testing.B) {
 		rw.SetPtr(p, 3, dateAddr)
 		rw.SetPtr(p, 4, ptrAddr)
 	}
+
 }
 
 func BenchmarkFastRWerSetValue(b *testing.B) {
@@ -423,7 +424,7 @@ func BenchmarkFastRWerSetValue(b *testing.B) {
 		rw.SetValue(p, 3, &date)
 		rw.SetValue(p, 4, ptr)
 	}
-	b.Log(o)
+	b.Log(o, *(o.Ptr))
 }
 
 func BenchmarkFastSet(b *testing.B) {
@@ -549,7 +550,7 @@ func testStruct() (int, string, float32, time.Time, *RWTestStruct) {
 	name := "test unsafe set, great!"
 	var cash float32 = 22.22
 	date := time.Now()
-	var ptr *RWTestStruct = nil //&RWTestStruct{1, "test", 1.1, time.Now(), nil}
+	var ptr *RWTestStruct = &RWTestStruct{555, "ptr test", 5.5, time.Now(), nil}
 
 	return id, name, cash, date, ptr
 }
