@@ -35,43 +35,52 @@ func AreNotSame(actual interface{}, expect interface{}, t tester) {
 	}
 }
 
-func isNil(a interface{}) bool {
+func isNil(a interface{}) (r bool) {
 	//fmt.Println(a)
+    defer func(){
+        if e := recover(); e != nil{
+            r = false
+        }
+    }()
 	if a == nil {
-		return true
+		r = true
 	} else if reflect.ValueOf(a).IsNil() {
-		return true
-	}
-	return false
+		r = true
+	} else {
+        r = false
+    }
+	return 
 	//return a == nil || reflect.ValueOf(a).IsNil()
 }
 
 func Compare(a interface{}, b interface{}) bool {
 	v1, v2 := reflect.ValueOf(a), reflect.ValueOf(b)
 
-	if a == nil || b == nil {
-		if a == nil && b == nil {
-			return true
-		} else {
-			//fmt.Println("nil", a, b, a == nil, b == nil, v1.IsNil(), v2)
-			var typ reflect.Type
-			if a == nil {
-				typ = v2.Type()
-			} else {
-				typ = v1.Type()
-			}
+    aIsNil, bIsNil := isNil(a), isNil(b) 
+	if aIsNil || bIsNil {
+        return aIsNil == bIsNil
+		//if a == nil && b == nil {
+		//	return true
+		//} else {
+		//	//fmt.Println("nil", a, b, a == nil, b == nil, v1.IsNil(), v2)
+		//	var typ reflect.Type
+		//	if a == nil {
+		//		typ = v2.Type()
+		//	} else {
+		//		typ = v1.Type()
+		//	}
 
-			//Chan, Func, Interface, Map, Ptr, or Slice
-			switch typ.Kind() {
-			case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-				return isNil(a) && isNil(b)
-			default:
-				return false
-			}
-			//fmt.Println("nil", a, b, a == nil, b == nil, v1.IsNil(), v2)
-			//reflect.DeepEqual()
-			//return reflect.DeepEqual(a, b)
-		}
+		//	//Chan, Func, Interface, Map, Ptr, or Slice
+		//	switch typ.Kind() {
+		//	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		//		return isNil(a) && isNil(b)
+		//	default:
+		//		return false
+		//	}
+		//	//fmt.Println("nil", a, b, a == nil, b == nil, v1.IsNil(), v2)
+		//	//reflect.DeepEqual()
+		//	//return reflect.DeepEqual(a, b)
+		//}
 	}
 
 	if v1.Type() != v2.Type() {

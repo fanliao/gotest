@@ -255,14 +255,17 @@ func BenchmarkFastGet(b *testing.B) {
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	//meta := rw.GetStructMeta()
+	r := RWTestStruct{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = *((*int)(FastGet(p, rw, 0)))
-		_ = *((*string)(FastGet(p, rw, 1)))
-		_ = *((*float32)(FastGet(p, rw, 2)))
-		_ = *((*time.Time)(FastGet(p, rw, 3)))
-		_ = *((*RWTestStruct)(FastGet(p, rw, 4)))
+		r.Id = *((*int)(FastGet(p, rw, 0)))
+		r.Name = *((*string)(FastGet(p, rw, 1)))
+		r.Cash = *((*float32)(FastGet(p, rw, 2)))
+		r.Date = *((*time.Time)(FastGet(p, rw, 3)))
+		r.Ptr = *((**RWTestStruct)(FastGet(p, rw, 4)))
 	}
+	b.StopTimer()
+	AreSame(r, *o, b)
 }
 
 func BenchmarkOriginalGet(b *testing.B) {
@@ -278,7 +281,6 @@ func BenchmarkOriginalGet(b *testing.B) {
 		_ = o.Ptr
 	}
 	//b.StopTimer()
-	//b.Log(id, name)
 }
 
 func BenchmarkReflectGetByName(b *testing.B) {
@@ -287,16 +289,17 @@ func BenchmarkReflectGetByName(b *testing.B) {
 	//t := v.Type()
 	//var id int
 	//var name string
+	r := RWTestStruct{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = v.FieldByName("Id").Interface().(int)
-		_ = v.FieldByName("Name").Interface().(string)
-		_ = v.FieldByName("Cash").Interface().(float32)
-		_ = v.FieldByName("Date").Interface().(time.Time)
-		_ = v.FieldByName("Ptr").Interface().(*RWTestStruct)
+		r.Id = v.FieldByName("Id").Interface().(int)
+		r.Name = v.FieldByName("Name").Interface().(string)
+		r.Cash = v.FieldByName("Cash").Interface().(float32)
+		r.Date = v.FieldByName("Date").Interface().(time.Time)
+		r.Ptr = v.FieldByName("Ptr").Interface().(*RWTestStruct)
 	}
-	//b.StopTimer()
-	//b.Log(id, name)
+	b.StopTimer()
+	AreSame(r, *o, b)
 }
 
 func BenchmarkReflectGet(b *testing.B) {
@@ -305,16 +308,17 @@ func BenchmarkReflectGet(b *testing.B) {
 	//t := v.Type()
 	//var id int
 	//var name string
+	r := RWTestStruct{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = v.Field(0).Interface().(int)
-		_ = v.Field(1).Interface().(string)
-		_ = v.Field(2).Interface().(float32)
-		_ = v.Field(3).Interface().(time.Time)
-		_ = v.Field(4).Interface().(*RWTestStruct)
+		r.Id = v.Field(0).Interface().(int)
+		r.Name = v.Field(1).Interface().(string)
+		r.Cash = v.Field(2).Interface().(float32)
+		r.Date = v.Field(3).Interface().(time.Time)
+		r.Ptr = v.Field(4).Interface().(*RWTestStruct)
 	}
-	//b.StopTimer()
-	//b.Log(id, name)
+	b.StopTimer()
+	AreSame(r, *o, b)
 }
 
 func BenchmarkFastRWerSetPtrByName(b *testing.B) {
@@ -342,6 +346,12 @@ func BenchmarkFastRWerSetPtrByName(b *testing.B) {
 		rw.SetPtrByName(p, "Date", dateAddr)
 		rw.SetPtrByName(p, "Ptr", ptrAddr)
 	}
+	b.StopTimer()
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func BenchmarkFastRWerSetPtr(b *testing.B) {
@@ -363,6 +373,12 @@ func BenchmarkFastRWerSetPtr(b *testing.B) {
 		rw.SetPtr(p, 3, dateAddr)
 		rw.SetPtr(p, 4, ptrAddr)
 	}
+	b.StopTimer()
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func BenchmarkFastRWerSetValueByName(b *testing.B) {
@@ -378,6 +394,12 @@ func BenchmarkFastRWerSetValueByName(b *testing.B) {
 		rw.SetValueByName(p, "Date", date)
 		rw.SetValueByName(p, "Ptr", ptr)
 	}
+	b.StopTimer()
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func BenchmarkFastRWerSetValue(b *testing.B) {
@@ -395,7 +417,13 @@ func BenchmarkFastRWerSetValue(b *testing.B) {
 		rw.SetValue(p, 3, &date)
 		rw.SetValue(p, 4, ptr)
 	}
-	b.Log(o)
+	//b.Log(o)
+	b.StopTimer()
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func BenchmarkFastSet(b *testing.B) {
@@ -419,7 +447,11 @@ func BenchmarkFastSet(b *testing.B) {
 		FastSet(p, rw, 4, ptrAddr)
 	}
 	b.StopTimer()
-	b.Log(o.Id, o.Name)
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func BenchmarkOriginalSet(b *testing.B) {
@@ -451,7 +483,11 @@ func BenchmarkReflectSet(b *testing.B) {
 		v.Field(4).Set(reflect.ValueOf(ptr))
 	}
 	b.StopTimer()
-	//b.Log(o.Id, o.Name)
+	AreSame(o.Id, id, b)
+	AreSame(o.Name, name, b)
+	AreSame(o.Cash, cash, b)
+	AreSame(o.Date, date, b)
+	AreSame(o.Ptr, ptr, b)
 }
 
 func getFieldOffset(p interface{}, t *testing.T) map[string]uintptr {
