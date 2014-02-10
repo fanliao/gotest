@@ -25,6 +25,7 @@ type RWTestStruct2 struct {
 	Cash float32
 	Date time.Time
 	RWTestStruct1
+	Ptr *RWTestStruct2
 }
 
 func main() {
@@ -106,7 +107,7 @@ func main() {
 }
 
 func benchmarkFastRWerGet(n int) {
-	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}}
+	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}, nil}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	//var id int
@@ -121,7 +122,7 @@ func benchmarkFastRWerGet(n int) {
 }
 
 func benchmarkFastRWerGetValue(n int) {
-	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}}
+	o := &RWTestStruct2{1, "test", 1.1, time.Now(), RWTestStruct1{}, nil}
 	p := unsafe.Pointer(o)
 	rw := GetFastRWer(o)
 	for i := 0; i < n; i++ {
@@ -141,7 +142,7 @@ func benchmarkFastRWerSetValueByName() {
 	name := "test unsafe set, great!"
 	var cash float64 = 22.22
 	date := time.Now()
-	ptr := &RWTestStruct1{1, "test"}
+	var ptr *RWTestStruct2 = nil //&RWTestStruct1{1, "test"}
 
 	//rw.SetValue(p, 0, id)
 	//rw.SetValue(p, 1, &name)
@@ -156,6 +157,28 @@ func benchmarkFastRWerSetValueByName() {
 	rw.SetValueByName(p, "Ptr", ptr)
 
 	fmt.Println("SetValueByName", o)
+	AreSame(nil, o.Ptr, nil)
+	printInterfaceLayout(nil)
+	printInterfaceLayout(o.Ptr)
+	printInterfaceLayout(RWTestStruct2{})
+
+}
+
+func printInterfaceLayout(a interface{}) {
+	s := *((*interfaceHeader)(unsafe.Pointer(&a)))
+	if uintptr(unsafe.Pointer(s.typ)) != 0 {
+		fmt.Println(s, *(s.typ), *(*s.typ).string)
+		p := s.typ.ptrToThis
+		for uintptr(unsafe.Pointer(p)) != 0 {
+			fmt.Println("this is pointer to", *(p), *p.string)
+			p = p.ptrToThis
+		}
+		//if uintptr(unsafe.Pointer((s.typ.ptrToThis))) != 0 {
+		//	fmt.Println("this is pointer to", *(s.typ.ptrToThis), *(*s.typ).string)
+		//}
+	} else {
+		fmt.Println(s)
+	}
 
 }
 

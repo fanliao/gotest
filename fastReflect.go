@@ -2,6 +2,7 @@ package main
 
 import (
 	//	"fmt"
+	"errors"
 	"reflect"
 	"sync"
 	"time"
@@ -107,7 +108,7 @@ func (this *FastRW) SetPtrByName(obj unsafe.Pointer, fieldName string, source ui
 	}
 }
 
-func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
+func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) (err error) {
 	//fmt.Println("SetValue", source)
 	//fmt.Println(*((*interfaceHeader)(unsafe.Pointer(&source))))
 	target := uintptr(obj) + this.FieldOffsetsByIndex[i]
@@ -123,17 +124,24 @@ func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) {
 	//	dataPtr = s.word
 	//}
 	//fmt.Println(t.Kind(), size, t.size, dataPtr)
-	ft := *(this.FieldTypesByIndex[i])
-	if ft.Kind() == reflect.Ptr && t.Kind() == reflect.Ptr {
-		//如果字段是指针类型，则直接copy原指针指向的地址
-		copyUint(target, dataPtr, size)
-	} else if (t.Kind() == reflect.Ptr && dataPtr != 0) || t.size > ptrSize {
-		//如果i是指针或者i的长度超过了一个字的长度，则s.word是一个指向数据的指针
-		copyVar(target, dataPtr, size)
+	fldTyp, valTyp := *(this.FieldTypesByIndex[i]), t.Kind()
+	if fldTyp.Kind() == reflect.Ptr {
+		if valTyp != reflect.Ptr {
+			err = errors.New("expect a pointer, but actual is " + valTyp.String())
+		} else {
+			//如果两个变量都是指针类型，则直接copy原指针指向的地址
+			copyUint(target, dataPtr, size)
+		}
 	} else {
-		//copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
-		copyUint(target, dataPtr, size)
+		if (valTyp == reflect.Ptr && dataPtr != 0) || t.size > ptrSize {
+			//如果i是指针或者i的长度超过了一个字的长度，则s.word是一个指向数据的指针
+			copyVar(target, dataPtr, size)
+		} else {
+			//copyVar(target, uintptr(unsafe.Pointer(&dataPtr)), size)
+			copyUint(target, dataPtr, size)
+		}
 	}
+	return
 	//_, _, _ = dataPtr, target, size
 }
 
