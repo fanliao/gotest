@@ -5,6 +5,20 @@ import (
 )
 
 type struct1 struct {
+	i int
+}
+
+func (this struct1) GetI() int {
+	return this.i
+}
+
+type struct2 struct {
+	j int
+	*struct1
+}
+
+func (this struct2) GetJ() int {
+	return this.j
 }
 
 func (this struct1) getMethod() string {
