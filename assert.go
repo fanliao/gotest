@@ -55,7 +55,13 @@ func isNil(a interface{}) (r bool) {
 	//return a == nil || reflect.ValueOf(a).IsNil()
 }
 
-func Compare(a interface{}, b interface{}) bool {
+// equals tests for deep equality. It uses normal == equality where
+// possible but will scan elements of arrays, slices, maps, and fields of
+// structs. In maps, keys are compared with == but elements use deep
+// equality. DeepEqual correctly handles recursive types. Functions are equal
+// only if they are both nil.
+// An empty slice is not equal to a nil slice.
+func equals(a interface{}, b interface{}) bool {
 	v1, v2 := reflect.ValueOf(a), reflect.ValueOf(b)
 
 	aIsNil, bIsNil := isNil(a), isNil(b)
