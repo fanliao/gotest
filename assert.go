@@ -13,8 +13,8 @@ type tester interface {
 	Fail()
 }
 
-func AreSame(actual interface{}, expect interface{}, t tester) {
-	if !Compare(actual, expect) {
+func AreEqual(actual interface{}, expect interface{}, t tester) {
+	if !equals(actual, expect) {
 		if t != nil {
 			t.Log("Failed! expect", expect, ", actual", actual)
 			t.Fail()
@@ -24,8 +24,8 @@ func AreSame(actual interface{}, expect interface{}, t tester) {
 	}
 }
 
-func AreNotSame(actual interface{}, expect interface{}, t tester) {
-	if Compare(actual, expect) {
+func AreNotEqual(actual interface{}, expect interface{}, t tester) {
+	if equals(actual, expect) {
 		if t != nil {
 			t.Log("Failed! expect", expect, " should be different with actual", actual)
 			t.Fail()
@@ -55,13 +55,19 @@ func isNil(a interface{}) (r bool) {
 	//return a == nil || reflect.ValueOf(a).IsNil()
 }
 
-// equals tests for deep equality. It uses normal == equality where
+// equals tests for equality. It uses normal == equality where
 // possible but will scan elements of arrays, slices, maps, and fields of
 // structs. In maps, keys are compared with == but elements use deep
 // equality. DeepEqual correctly handles recursive types. Functions are equal
-// only if they are both nil.
+// only if they are pointer to one function.
 // An empty slice is not equal to a nil slice.
-func equals(a interface{}, b interface{}) bool {
+// A pointer with nil value is equal to nil
+func equals(a interface{}, b interface{}, deeps ...bool) bool {
+	var deep bool = false
+	if len(deeps) > 0 {
+		deep = deeps[0]
+	}
+
 	v1, v2 := reflect.ValueOf(a), reflect.ValueOf(b)
 
 	aIsNil, bIsNil := isNil(a), isNil(b)
@@ -80,12 +86,12 @@ func equals(a interface{}, b interface{}) bool {
 			return true
 		}
 		for _, k := range v1.MapKeys() {
-			if v1.MapIndex(k) != v2.MapIndex(k) {
+			if !equals(v1.MapIndex(k), v2.MapIndex(k), deep) { //v1.MapIndex(k) != v2.MapIndex(k) {
 				return false
 			}
 		}
 		for _, k := range v2.MapKeys() {
-			if v2.MapIndex(k) != v1.MapIndex(k) {
+			if !equals(v2.MapIndex(k), v1.MapIndex(k), deep) { //v2.MapIndex(k) != v1.MapIndex(k) {
 				return false
 			}
 		}
@@ -95,7 +101,7 @@ func equals(a interface{}, b interface{}) bool {
 			return false
 		} else {
 			for i := 0; i < v1.Len(); i++ {
-				if v1.Index(i).Interface() != v2.Index(i).Interface() {
+				if !equals(v1.Index(i), v2.Index(i), deep) { // v1.Index(i).Interface() != v2.Index(i).Interface() {
 					//fmt.Println("compare s", v1.Index(i).Interface(), v2.Index(i).Interface())
 					return false
 				}
@@ -113,16 +119,20 @@ func equals(a interface{}, b interface{}) bool {
 		//the other word for either the contained data or a pointer to it.
 		//so if data size is more than one word, addr1 be a pointer
 		//otherwise addr1 be the data
-		if v1.Type().Size() > ptrSize1 {
-			return compareBytes(addr1, addr2, v1.Type().Size())
+		if deep {
+			return false
 		} else {
-			return addr1 == addr2
+			if v1.Type().Size() > ptrSize1 {
+				return bytesEquals(addr1, addr2, v1.Type().Size())
+			} else {
+				return addr1 == addr2
+			}
 		}
 
 	case reflect.Ptr:
 		//if v1.Elem().Type().Kind() == reflect.Struct {
 		//	//fmt.Println("struct", reflect.Indirect(v1).Interface(), reflect.Indirect(v2).Interface())
-		//	return compareBytes(reflect.Indirect(v1).UnsafeAddr(), reflect.Indirect(v2).UnsafeAddr(), v1.Elem().Type().Size())
+		//	return bytesEquals(reflect.Indirect(v1).UnsafeAddr(), reflect.Indirect(v2).UnsafeAddr(), v1.Elem().Type().Size())
 		//} else {
 		return a == b
 		//}
@@ -131,7 +141,7 @@ func equals(a interface{}, b interface{}) bool {
 	}
 }
 
-func compareBytes(addr1 uintptr, addr2 uintptr, size uintptr) bool {
+func bytesEquals(addr1 uintptr, addr2 uintptr, size uintptr) bool {
 	for i := 0; uintptr(i) < size; i++ {
 		//fmt.Println(addr1+uintptr(i), addr2+uintptr(i))
 		//fmt.Println(*((*byte)(unsafe.Pointer(addr1 + uintptr(i)))), *((*byte)(unsafe.Pointer(addr2 + uintptr(i)))))

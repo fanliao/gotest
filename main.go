@@ -77,7 +77,8 @@ func main() {
 	//testFuture()
 
 	//testStructUnsafeCode()
-	//testCompare()
+	testCompare()
+	testGetUnexported()
 	//testSetUnexported()
 
 	c := make(chan int)
@@ -157,7 +158,7 @@ func benchmarkFastRWerSetValueByName() {
 	rw.SetValueByName(p, "Ptr", ptr)
 
 	fmt.Println("SetValueByName", o)
-	AreSame(nil, o.Ptr, nil)
+	AreEqual(nil, o.Ptr, nil)
 	printInterfaceLayout(nil)
 	printInterfaceLayout(o.Ptr)
 	printInterfaceLayout(RWTestStruct2{})
@@ -165,9 +166,14 @@ func benchmarkFastRWerSetValueByName() {
 }
 
 func printInterfaceLayout(a interface{}) {
+	fmt.Println("printInterfaceLayout")
 	s := *((*interfaceHeader)(unsafe.Pointer(&a)))
 	if uintptr(unsafe.Pointer(s.typ)) != 0 {
 		fmt.Println(s, *(s.typ), *(*s.typ).string)
+		if s.typ.Kind() == reflect.Struct {
+			tt := (*structType)(unsafe.Pointer(s.typ))
+			fmt.Println("struct layout", *tt, "\n")
+		}
 		p := s.typ.ptrToThis
 		for uintptr(unsafe.Pointer(p)) != 0 {
 			fmt.Println("this is pointer to", *(p), *p.string)
@@ -179,6 +185,7 @@ func printInterfaceLayout(a interface{}) {
 	} else {
 		fmt.Println(s)
 	}
+	fmt.Println()
 
 }
 
@@ -194,6 +201,15 @@ type st1 struct {
 type st2 struct {
 	a int
 	b map[int]int
+}
+
+func testGetUnexported() {
+	st11 := st1{2, 3454}
+	//panic: reflect.Value.UnsafeAddr of unaddressable value
+	aOffset := reflect.ValueOf(st11).Field(1)
+	fmt.Println(aOffset.CanAddr(), aOffset.CanInterface(), aOffset.CanSet())
+	//panic: reflect.Value.Interface: cannot return value obtained from unexported field or method
+	//fmt.Println(aOffset.Interface())
 }
 
 func testSetUnexported() {
@@ -233,6 +249,10 @@ func testStructUnsafeCode() {
 }
 
 func testCompare() {
+	m11 := map[int]int{1: 1}
+	m22 := map[int]int64{1: 1}
+	fmt.Println(reflect.TypeOf(m11), reflect.TypeOf(m22), reflect.TypeOf(m11) == reflect.TypeOf(m22))
+
 	f := func() {
 
 	}
@@ -278,13 +298,13 @@ func testCompare() {
 			}
 		}()
 		//r = a == b
-		r = Compare(a, b)
+		r = equals(a, b)
 		return
 	}
 	for i, d := range testdatas {
 		r := f1(d[0], d[1])
 		fmt.Println(i, reflect.TypeOf(d[0]), d[0], "=", d[1], r)
-		AreSame(r, d[2], nil)
+		AreEqual(r, d[2], nil)
 		fmt.Println()
 	}
 

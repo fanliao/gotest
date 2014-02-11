@@ -350,3 +350,19 @@ type rtype struct {
 }
 
 func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
+
+//copy from type.go
+// Struct field
+type structField struct {
+	name    *string // nil for embedded fields
+	pkgPath *string // nil for exported Names; otherwise import path
+	typ     *rtype  // type of field
+	tag     *string // nil if no tag
+	offset  uintptr // byte offset of field within struct
+}
+
+// structType represents a struct type.
+type structType struct {
+	rtype  `reflect:"struct"`
+	fields []structField // sorted by offset
+}
