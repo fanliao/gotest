@@ -8,6 +8,11 @@ import (
 
 const ptrSize1 = unsafe.Sizeof((*byte)(nil))
 
+type visit struct {
+	a1 uintptr
+	a2 uintptr
+}
+
 type tester interface {
 	Log(args ...interface{})
 	Fail()
@@ -55,6 +60,14 @@ func isNil(a interface{}) (r bool) {
 	//return a == nil || reflect.ValueOf(a).IsNil()
 }
 
+func equals(a interface{}, b interface{}, deeps ...bool) bool {
+	var deep bool = false
+	if len(deeps) > 0 {
+		deep = deeps[0]
+	}
+	return checkEquals(a, b, deep, make(map[visit]bool))
+}
+
 // equals tests for equality. It uses normal == equality where
 // possible but will scan elements of arrays, slices, maps, and fields of
 // structs. In maps, keys are compared with == but elements use deep
@@ -62,13 +75,10 @@ func isNil(a interface{}) (r bool) {
 // only if they are pointer to one function.
 // An empty slice is not equal to a nil slice.
 // A pointer with nil value is equal to nil
-func equals(a interface{}, b interface{}, deeps ...bool) bool {
-	var deep bool = false
-	if len(deeps) > 0 {
-		deep = deeps[0]
-	}
+func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool) bool {
 
 	v1, v2 := reflect.ValueOf(a), reflect.ValueOf(b)
+	addr1, addr2 := InterfaceToPtr1(a), InterfaceToPtr1(b)
 
 	aIsNil, bIsNil := isNil(a), isNil(b)
 	if aIsNil || bIsNil {
@@ -80,18 +90,41 @@ func equals(a interface{}, b interface{}, deeps ...bool) bool {
 		return false
 	}
 
+	//copy from deepValueEqual.go
+	// if depth > 10 { panic("deepValueEqual") }	// for debugging
+	hard := func(k reflect.Kind) bool {
+		switch k {
+		case reflect.Array, reflect.Map, reflect.Slice, reflect.Struct:
+			return true
+		}
+		return false
+	}
+	if hard(v1.Type().Kind()) {
+		var v visit
+		if addr1 > addr2 {
+			v = visit{addr2, addr1}
+		} else {
+			v = visit{addr1, addr2}
+		}
+		if visited[v] {
+			return true
+		} else {
+			visited[v] = true
+		}
+	}
+
 	switch k := v1.Type().Kind(); k {
 	case reflect.Map:
 		if len(v1.MapKeys()) == 0 && len(v2.MapKeys()) == 0 {
 			return true
 		}
 		for _, k := range v1.MapKeys() {
-			if !equals(v1.MapIndex(k), v2.MapIndex(k), deep) { //v1.MapIndex(k) != v2.MapIndex(k) {
+			if !checkEquals(v1.MapIndex(k).Interface(), v2.MapIndex(k).Interface(), deep, visited) { //v1.MapIndex(k) != v2.MapIndex(k) {
 				return false
 			}
 		}
 		for _, k := range v2.MapKeys() {
-			if !equals(v2.MapIndex(k), v1.MapIndex(k), deep) { //v2.MapIndex(k) != v1.MapIndex(k) {
+			if !checkEquals(v2.MapIndex(k).Interface(), v1.MapIndex(k).Interface(), deep, visited) { //v2.MapIndex(k) != v1.MapIndex(k) {
 				return false
 			}
 		}
@@ -101,27 +134,35 @@ func equals(a interface{}, b interface{}, deeps ...bool) bool {
 			return false
 		} else {
 			for i := 0; i < v1.Len(); i++ {
-				if !equals(v1.Index(i), v2.Index(i), deep) { // v1.Index(i).Interface() != v2.Index(i).Interface() {
-					//fmt.Println("compare s", v1.Index(i).Interface(), v2.Index(i).Interface())
+				if !checkEquals(v1.Index(i).Interface(), v2.Index(i).Interface(), deep, visited) { // v1.Index(i).Interface() != v2.Index(i).Interface() {
+					fmt.Println("compare s", v1.Index(i).Interface(), v2.Index(i).Interface())
 					return false
 				}
 			}
 			return true
 		}
 	case reflect.Func:
-		addr1, addr2 := InterfaceToPtr1(a), InterfaceToPtr1(b)
 		return addr1 == addr2
 
 	case reflect.Struct:
-		addr1, addr2 := InterfaceToPtr1(a), InterfaceToPtr1(b)
-		//Each interface{} variable takes up 2 words in memory:
-		//one word for the type of what is contained,
-		//the other word for either the contained data or a pointer to it.
-		//so if data size is more than one word, addr1 be a pointer
-		//otherwise addr1 be the data
 		if deep {
+			for i := 0; i < v1.NumField(); i++ {
+				fld1, fld2 := v1.Field(i), v2.Field(i)
+				if !v1.CanInterface() {
+					fmt.Println(reflect.TypeOf(a).Field(i).Name, "cannot interface")
+					continue
+				}
+				if !checkEquals(fld1, fld2, deep, visited) {
+					return false
+				}
+			}
 			return false
 		} else {
+			//Each interface{} variable takes up 2 words in memory:
+			//one word for the type of what is contained,
+			//the other word for either the contained data or a pointer to it.
+			//so if data size is more than one word, addr1 be a pointer
+			//otherwise addr1 be the data
 			if v1.Type().Size() > ptrSize1 {
 				return bytesEquals(addr1, addr2, v1.Type().Size())
 			} else {
@@ -134,7 +175,12 @@ func equals(a interface{}, b interface{}, deeps ...bool) bool {
 		//	//fmt.Println("struct", reflect.Indirect(v1).Interface(), reflect.Indirect(v2).Interface())
 		//	return bytesEquals(reflect.Indirect(v1).UnsafeAddr(), reflect.Indirect(v2).UnsafeAddr(), v1.Elem().Type().Size())
 		//} else {
-		return a == b
+		if deep {
+			v1.Elem().Type()
+			return checkEquals(v1.Elem(), v2.Elem(), deep, visited)
+		} else {
+			return a == b
+		}
 		//}
 	default:
 		return a == b

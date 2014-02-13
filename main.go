@@ -76,6 +76,8 @@ func main() {
 
 	//testFuture()
 
+	i := 12
+	fmt.Println("type of unsafe.pointer is", reflect.TypeOf(unsafe.Pointer(&i)).Kind())
 	//testStructUnsafeCode()
 	testCompare()
 	testGetUnexported()
@@ -161,12 +163,19 @@ func benchmarkFastRWerSetValueByName() {
 	AreEqual(nil, o.Ptr, nil)
 	printInterfaceLayout(nil)
 	printInterfaceLayout(o.Ptr)
+	faceAreEqual(nil, o.Ptr)
+	fmt.Println("nil == ptr of nil?", o.Ptr == nil)
 	printInterfaceLayout(RWTestStruct2{})
 
 }
 
+func faceAreEqual(a interface{}, b interface{}) (r bool) {
+	fmt.Println("faceAreEqual?", a == b)
+	return a == b
+}
+
 func printInterfaceLayout(a interface{}) {
-	fmt.Println("printInterfaceLayout")
+	fmt.Println("printInterfaceLayout", a, "isnil?", a == nil)
 	s := *((*interfaceHeader)(unsafe.Pointer(&a)))
 	if uintptr(unsafe.Pointer(s.typ)) != 0 {
 		fmt.Println(s, *(s.typ), *(*s.typ).string)
