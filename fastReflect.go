@@ -1,8 +1,8 @@
 package main
 
 import (
-	//	"fmt"
 	"errors"
+	//"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -184,6 +184,9 @@ func GetFastRWer(obj interface{}) *FastRW {
 		for i := 0; i < t.NumField(); i++ {
 			fType := t.Field(i)
 			f := v.Field(i)
+			if !f.CanInterface() {
+				continue
+			}
 			meta.FieldOffsetsByIndex[i] = f.UnsafeAddr() - objAddr
 			meta.FieldIndexsByName[fType.Name] = i
 			meta.FieldNamesByIndex[i] = fType.Name
@@ -198,6 +201,44 @@ func GetFastRWer(obj interface{}) *FastRW {
 		mc.set(t, fastRW)
 		return fastRW
 	}
+
+}
+
+//Get a FastRWer implement class by a pointer of struct
+//obj must be a pointer of struct value
+func GetFastRWer1(obj interface{}) *FastRW {
+	fs := faceToStruct(obj)
+	s := *((*structType)(unsafe.Pointer(fs.typ)))
+
+	//if fastRW := mc.get(t); fastRW != nil {
+	//	return fastRW
+	//} else {
+
+	meta := structMeta{}
+
+	numField := len(s.fields)
+
+	meta.FieldIndexsByName = make(map[string]int, numField)
+	meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
+	meta.FieldNamesByIndex = make([]string, numField, numField)
+	meta.FieldSizeByIndex = make([]uintptr, numField, numField)
+	meta.FieldTypesByIndex = make([]*reflect.Type, numField, numField)
+	for i := 0; i < numField; i++ {
+		fld := s.fields[i]
+		meta.FieldOffsetsByIndex[i] = fld.offset
+		meta.FieldIndexsByName[*(fld.name)] = i
+		meta.FieldNamesByIndex[i] = *(fld.name)
+		meta.FieldSizeByIndex[i] = fld.typ.size
+		//fmt.Println(f.Type().Size(), f.Type().Name(), fType.Type.Size())
+		//t := f.Type()
+		//meta.FieldTypesByIndex[i] = &t
+		//v := f.Interface()
+	}
+
+	fastRW := newFastRWImpl(meta)
+	//mc.set(t, fastRW)
+	return fastRW
+	//}
 
 }
 
@@ -329,6 +370,11 @@ type interfaceHeader struct {
 func InterfaceToDataPtr(i interface{}) uintptr {
 	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
 	return s.word
+}
+
+func faceToStruct(i interface{}) interfaceHeader {
+	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
+	return s
 }
 
 // rtype is the common implementation of most values.

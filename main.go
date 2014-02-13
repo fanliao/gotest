@@ -15,6 +15,7 @@ import (
 type RWTestStruct1 struct {
 	Id1   int
 	Name1 string
+	a     int
 }
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -82,6 +83,31 @@ func main() {
 	testCompare()
 	testGetUnexported()
 	//testSetUnexported()
+
+	fmt.Println()
+	s1 := RWTestStruct1{10, "hello", 20}
+	p := unsafe.Pointer(&s1)
+	rwer1 := GetFastRWer(&s1)
+	rwer2 := GetFastRWer1(s1)
+	printRWer := func(rw *FastRW) {
+		for i := 0; i < len(rw.FieldNamesByIndex); i++ {
+			fmt.Println(rw.FieldNamesByIndex[i], "size is", rw.FieldSizeByIndex[i], "offset is", rw.FieldOffsetsByIndex[i])
+		}
+	}
+	fmt.Println("GetFastRWer")
+	//反射不能获取未导出的字段
+	printRWer(rwer1)
+	fmt.Println("GetFastRWer1")
+	//直接获取rtype可以
+	printRWer(rwer2)
+	//测试读取未导出字段
+	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
+	//测试写入未导出字段
+	intF, strF := 11, "aaa"
+	rwer2.SetPtr(p, 2, uintptr(unsafe.Pointer(&intF)))
+	rwer2.SetPtr(p, 1, uintptr(unsafe.Pointer(&strF)))
+	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
+	fmt.Println()
 
 	c := make(chan int)
 	go func() {
