@@ -68,7 +68,7 @@ func main() {
 	//}
 	//pprof.StartCPUProfile(f)
 	//defer pprof.StopCPUProfile()
-	//benchmarkFastRWerGet(500000)
+	benchmarkFastRWerGet(500000)
 	//benchmarkFastRWerGetValue(500000)
 	////}
 	////var s string
@@ -80,34 +80,10 @@ func main() {
 	i := 12
 	fmt.Println("type of unsafe.pointer is", reflect.TypeOf(unsafe.Pointer(&i)).Kind())
 	//testStructUnsafeCode()
-	testCompare()
-	testGetUnexported()
-	//testSetUnexported()
+	//testCompare()
+	testKind()
 
-	fmt.Println()
-	s1 := RWTestStruct1{10, "hello", 20}
-	p := unsafe.Pointer(&s1)
-	rwer1 := GetFastRWer(&s1)
-	rwer2 := GetFastRWer1(s1)
-	printRWer := func(rw *FastRW) {
-		for i := 0; i < len(rw.FieldNamesByIndex); i++ {
-			fmt.Println(rw.FieldNamesByIndex[i], "size is", rw.FieldSizeByIndex[i], "offset is", rw.FieldOffsetsByIndex[i])
-		}
-	}
-	fmt.Println("GetFastRWer")
-	//反射不能获取未导出的字段
-	printRWer(rwer1)
-	fmt.Println("GetFastRWer1")
-	//直接获取rtype可以
-	printRWer(rwer2)
-	//测试读取未导出字段
-	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
-	//测试写入未导出字段
-	intF, strF := 11, "aaa"
-	rwer2.SetPtr(p, 2, uintptr(unsafe.Pointer(&intF)))
-	rwer2.SetPtr(p, 1, uintptr(unsafe.Pointer(&strF)))
-	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
-	fmt.Println()
+	testRWUnexported()
 
 	c := make(chan int)
 	go func() {
@@ -200,6 +176,11 @@ func faceAreEqual(a interface{}, b interface{}) (r bool) {
 	return a == b
 }
 
+func testKind() {
+	fmt.Println("testKind", flagRO, flagIndir, flagAddr, flagMethod,
+		flagKindShift, flagKindWidth, flagKindMask, flagMethodShift, "\n")
+}
+
 func printInterfaceLayout(a interface{}) {
 	fmt.Println("printInterfaceLayout", a, "isnil?", a == nil)
 	s := *((*interfaceHeader)(unsafe.Pointer(&a)))
@@ -238,22 +219,32 @@ type st2 struct {
 	b map[int]int
 }
 
-func testGetUnexported() {
-	st11 := st1{2, 3454}
-	//panic: reflect.Value.UnsafeAddr of unaddressable value
-	aOffset := reflect.ValueOf(st11).Field(1)
-	fmt.Println(aOffset.CanAddr(), aOffset.CanInterface(), aOffset.CanSet())
-	//panic: reflect.Value.Interface: cannot return value obtained from unexported field or method
-	//fmt.Println(aOffset.Interface())
-}
+func testRWUnexported() {
+	fmt.Println()
+	s1 := RWTestStruct1{10, "hello", 20}
+	p := unsafe.Pointer(&s1)
+	rwer1 := GetFastRWer_bak(&s1)
+	rwer2 := GetFastRWer(s1)
+	printRWer := func(rw *FastRW) {
+		for i := 0; i < len(rw.FieldNamesByIndex); i++ {
+			fmt.Println(rw.FieldNamesByIndex[i], "size is", rw.FieldSizeByIndex[i], "offset is", rw.FieldOffsetsByIndex[i])
+		}
+	}
+	fmt.Println("GetFastRWer")
+	//反射不能获取未导出的字段
+	printRWer(rwer1)
+	fmt.Println("GetFastRWer1")
+	//直接获取rtype可以
+	printRWer(rwer2)
+	//测试读取未导出字段
+	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
+	//测试写入未导出字段
+	intF, strF := 11, "aaa"
+	rwer2.SetPtr(p, 2, uintptr(unsafe.Pointer(&intF)))
+	rwer2.SetPtr(p, 1, uintptr(unsafe.Pointer(&strF)))
+	fmt.Println(s1, "is {", *((*int)(rwer2.Ptr(p, 0))), *((*string)(rwer2.Ptr(p, 1))), *((*int)(rwer2.Ptr(p, 2))), "}")
+	fmt.Println()
 
-func testSetUnexported() {
-	st11 := st1{2, 3454}
-	//panic: reflect.Value.UnsafeAddr of unaddressable value
-	aOffset := reflect.ValueOf(st11).Field(1).UnsafeAddr()
-	pint := (*int)(unsafe.Pointer(aOffset))
-	*pint = 110
-	fmt.Println(st11)
 }
 
 func testStructUnsafeCode() {

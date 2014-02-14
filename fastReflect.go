@@ -38,7 +38,7 @@ type structMeta struct {
 	FieldOffsetsByIndex []uintptr
 	FieldNamesByIndex   []string
 	FieldSizeByIndex    []uintptr
-	FieldTypesByIndex   []*reflect.Type
+	FieldTypesByIndex   []*rtype
 }
 
 //FastRWer implement class
@@ -124,7 +124,7 @@ func (this *FastRW) SetValue(obj unsafe.Pointer, i int, source interface{}) (err
 	//	dataPtr = s.word
 	//}
 	//fmt.Println(t.Kind(), size, t.size, dataPtr)
-	fldTyp, valTyp := *(this.FieldTypesByIndex[i]), t.Kind()
+	fldTyp, valTyp := this.FieldTypesByIndex[i], t.Kind()
 	if fldTyp.Kind() == reflect.Ptr {
 		if valTyp != reflect.Ptr {
 			err = errors.New("expect a pointer, but actual is " + valTyp.String())
@@ -163,7 +163,7 @@ func FastSet(obj unsafe.Pointer, this *FastRW, i int, source uintptr) {
 
 //Get a FastRWer implement class by a pointer of struct
 //obj must be a pointer of struct value
-func GetFastRWer(obj interface{}) *FastRW {
+func GetFastRWer_bak(obj interface{}) *FastRW {
 	v := reflect.Indirect(reflect.ValueOf(obj))
 	t := v.Type()
 
@@ -180,7 +180,7 @@ func GetFastRWer(obj interface{}) *FastRW {
 		meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
 		meta.FieldNamesByIndex = make([]string, numField, numField)
 		meta.FieldSizeByIndex = make([]uintptr, numField, numField)
-		meta.FieldTypesByIndex = make([]*reflect.Type, numField, numField)
+		//meta.FieldTypesByIndex = make([]*reflect.Type, numField, numField)
 		for i := 0; i < t.NumField(); i++ {
 			fType := t.Field(i)
 			f := v.Field(i)
@@ -191,10 +191,8 @@ func GetFastRWer(obj interface{}) *FastRW {
 			meta.FieldIndexsByName[fType.Name] = i
 			meta.FieldNamesByIndex[i] = fType.Name
 			meta.FieldSizeByIndex[i] = f.Type().Size()
-			//fmt.Println(f.Type().Size(), f.Type().Name(), fType.Type.Size())
-			t := f.Type()
-			meta.FieldTypesByIndex[i] = &t
-			//v := f.Interface()
+			//t := f.Type()
+			//meta.FieldTypesByIndex[i] = &t
 		}
 
 		fastRW = newFastRWImpl(meta)
@@ -206,8 +204,22 @@ func GetFastRWer(obj interface{}) *FastRW {
 
 //Get a FastRWer implement class by a pointer of struct
 //obj must be a pointer of struct value
-func GetFastRWer1(obj interface{}) *FastRW {
-	fs := faceToStruct(obj)
+func GetFastRWer(obj interface{}) *FastRW {
+	fs1 := faceToStruct(obj)
+	var fs interfaceHeader
+	if fs1.typ.Kind() == reflect.Ptr {
+		elemTyp := (*rtype)(unsafe.Pointer(((*ptrType)(unsafe.Pointer(fs1.typ))).elem))
+		if elemTyp.Kind() == reflect.Struct {
+			fs = interfaceHeader{elemTyp, fs1.word}
+		} else {
+			return nil
+		}
+	} else if fs1.typ.Kind() != reflect.Struct {
+		return nil
+	} else {
+		fs = fs1
+	}
+
 	s := *((*structType)(unsafe.Pointer(fs.typ)))
 
 	//if fastRW := mc.get(t); fastRW != nil {
@@ -217,21 +229,30 @@ func GetFastRWer1(obj interface{}) *FastRW {
 	meta := structMeta{}
 
 	numField := len(s.fields)
+	//fmt.Println("numField", len(s.fields))
 
 	meta.FieldIndexsByName = make(map[string]int, numField)
 	meta.FieldOffsetsByIndex = make([]uintptr, numField, numField)
 	meta.FieldNamesByIndex = make([]string, numField, numField)
 	meta.FieldSizeByIndex = make([]uintptr, numField, numField)
-	meta.FieldTypesByIndex = make([]*reflect.Type, numField, numField)
+	meta.FieldTypesByIndex = make([]*rtype, numField, numField)
 	for i := 0; i < numField; i++ {
 		fld := s.fields[i]
+		//fmt.Println(i)
+		var name string
+		if fld.name == nil {
+			name = *(fld.typ.string)
+		} else {
+			name = *(fld.name)
+		}
+		//fmt.Println(i, name, fld.typ.size, *fld.typ.string)
 		meta.FieldOffsetsByIndex[i] = fld.offset
-		meta.FieldIndexsByName[*(fld.name)] = i
-		meta.FieldNamesByIndex[i] = *(fld.name)
+		meta.FieldIndexsByName[name] = i
+		meta.FieldNamesByIndex[i] = name
 		meta.FieldSizeByIndex[i] = fld.typ.size
-		//fmt.Println(f.Type().Size(), f.Type().Name(), fType.Type.Size())
+		//fmt.Println(fld.typ.size, *fld.typ.string)
 		//t := f.Type()
-		//meta.FieldTypesByIndex[i] = &t
+		meta.FieldTypesByIndex[i] = fld.typ
 		//v := f.Interface()
 	}
 
@@ -306,8 +327,8 @@ func copyVar(target uintptr, source uintptr, size uintptr) {
 	//}
 }
 
-func getValue(typ *reflect.Type, ptr unsafe.Pointer) interface{} {
-	t := *typ
+func getValue(typ *rtype, ptr unsafe.Pointer) interface{} {
+	t := typ
 	switch t.Kind() {
 	case reflect.Bool:
 		return *((*bool)(ptr))
@@ -342,16 +363,31 @@ func getValue(typ *reflect.Type, ptr unsafe.Pointer) interface{} {
 	case reflect.String:
 		return *((*string)(ptr))
 	case reflect.Struct:
-		if t == dateType {
+		if *(t.string) == dateType.Name() {
 			//fmt.Println("use *time")
 			return *((*time.Time)(ptr))
 		} else {
-			return reflect.NewAt(t, ptr).Elem().Interface()
+			return toFace(toFaceHeader(typ, ptr)) //reflect.NewAt(t, ptr).Elem().Interface()
 		}
 	default:
-		return reflect.NewAt(t, ptr).Elem().Interface()
+		return toFace(toFaceHeader(typ, ptr)) //reflect.NewAt(t, ptr).Elem().Interface()
 	}
 }
+
+//the below code is copy from go source code
+
+type flag1 uintptr
+
+const (
+	flagRO flag1 = 1 << iota
+	flagIndir
+	flagAddr
+	flagMethod
+	flagKindShift         = iota
+	flagKindWidth         = 5 // there are 27 kinds
+	flagKindMask    flag1 = 1<<flagKindWidth - 1
+	flagMethodShift       = flagKindShift + flagKindWidth
+)
 
 //from type.go
 // High bit says whether type has
@@ -377,6 +413,24 @@ func faceToStruct(i interface{}) interfaceHeader {
 	return s
 }
 
+func toFaceHeader(typ *rtype, ptr unsafe.Pointer) *interfaceHeader {
+	if typ.Kind() == reflect.Ptr {
+		return &interfaceHeader{((*ptrType)(unsafe.Pointer(typ))).elem, uintptr(ptr)}
+	}
+
+	if typ.size > ptrSize {
+		return &interfaceHeader{typ, uintptr(ptr)}
+	} else {
+		var word uintptr
+		copyVar(uintptr(unsafe.Pointer(&word)), uintptr(ptr), typ.size)
+		return &interfaceHeader{typ, word}
+	}
+}
+
+func toFace(eface *interfaceHeader) interface{} {
+	return *((*interface{})(unsafe.Pointer(eface)))
+}
+
 // rtype is the common implementation of most values.
 // It is embedded in other, public struct types, but always
 // with a unique tag like `reflect:"array"` or `reflect:"ptr"`
@@ -397,7 +451,63 @@ type rtype struct {
 
 func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
 
-//copy from type.go
+// arrayType represents a fixed array type.
+type arrayType struct {
+	rtype `reflect:"array"`
+	elem  *rtype // array element type
+	slice *rtype // slice type
+	len   uintptr
+}
+
+// chanType represents a channel type.
+type chanType struct {
+	rtype `reflect:"chan"`
+	elem  *rtype  // channel element type
+	dir   uintptr // channel direction (ChanDir)
+}
+
+// funcType represents a function type.
+type funcType struct {
+	rtype     `reflect:"func"`
+	dotdotdot bool     // last input parameter is ...
+	in        []*rtype // input parameter types
+	out       []*rtype // output parameter types
+}
+
+// imethod represents a method on an interface type
+type imethod struct {
+	name    *string // name of method
+	pkgPath *string // nil for exported Names; otherwise import path
+	typ     *rtype  // .(*FuncType) underneath
+}
+
+// interfaceType represents an interface type.
+type interfaceType struct {
+	rtype   `reflect:"interface"`
+	methods []imethod // sorted by hash
+}
+
+// mapType represents a map type.
+type mapType struct {
+	rtype  `reflect:"map"`
+	key    *rtype // map key type
+	elem   *rtype // map element (value) type
+	bucket *rtype // internal bucket structure
+	hmap   *rtype // internal map header
+}
+
+// ptrType represents a pointer type.
+type ptrType struct {
+	rtype `reflect:"ptr"`
+	elem  *rtype // pointer element (pointed at) type
+}
+
+// sliceType represents a slice type.
+type sliceType struct {
+	rtype `reflect:"slice"`
+	elem  *rtype // slice element type
+}
+
 // Struct field
 type structField struct {
 	name    *string // nil for embedded fields
