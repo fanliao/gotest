@@ -67,7 +67,7 @@ func BenchmarkMapChan(b *testing.B) {
 		mapC.set(k, v)
 		r = mapC.get(k)
 	}
-	b.Log(r)
+	AreEqual(r, v, b)
 }
 
 type mapLock struct {
@@ -105,5 +105,5 @@ func BenchmarkMapLock(b *testing.B) {
 		mapC.set(k, v)
 		r = mapC.get(k)
 	}
-	b.Log(r)
+	AreEqual(r, v, b)
 }

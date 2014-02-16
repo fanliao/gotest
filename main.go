@@ -18,6 +18,13 @@ type RWTestStruct1 struct {
 	a     int
 }
 
+type RWTestStruct3 struct {
+	Id1   int
+	Name1 string
+	a     int
+	RWTestStruct2
+}
+
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 type RWTestStruct2 struct {
@@ -84,6 +91,7 @@ func main() {
 	testKind()
 
 	testRWUnexported()
+	testUnexportedFields(RWTestStruct3{})
 
 	c := make(chan int)
 	go func() {
@@ -171,6 +179,21 @@ func benchmarkFastRWerSetValueByName() {
 
 }
 
+func testUnexportedFields(o interface{}) {
+	fmt.Println("testUnexportedFields")
+	fs := faceToStruct(o)
+	s := *((*structType)(unsafe.Pointer(fs.typ)))
+	f := s.fields[3]
+	var name string
+	if f.name == nil {
+		name = *(f.typ.string)
+	} else {
+		name = *(f.name)
+	}
+	fmt.Println(len(s.fields))
+	fmt.Println(f.typ.string, f.name, name, "\n")
+}
+
 func faceAreEqual(a interface{}, b interface{}) (r bool) {
 	fmt.Println("faceAreEqual?", a == b)
 	return a == b
@@ -223,16 +246,16 @@ func testRWUnexported() {
 	fmt.Println()
 	s1 := RWTestStruct1{10, "hello", 20}
 	p := unsafe.Pointer(&s1)
-	rwer1 := GetFastRWer_bak(&s1)
+	//rwer1 := GetFastRWer_bak(&s1)
 	rwer2 := GetFastRWer(s1)
 	printRWer := func(rw *FastRW) {
 		for i := 0; i < len(rw.FieldNamesByIndex); i++ {
-			fmt.Println(rw.FieldNamesByIndex[i], "size is", rw.FieldSizeByIndex[i], "offset is", rw.FieldOffsetsByIndex[i])
+			fmt.Println(rw.FieldNamesByIndex[i], "size is", rw.FieldsByIndex[i].typ.size, "offset is", rw.FieldsByIndex[i].offset) //.FieldOffsetsByIndex[i])
 		}
 	}
-	fmt.Println("GetFastRWer")
-	//反射不能获取未导出的字段
-	printRWer(rwer1)
+	//fmt.Println("GetFastRWer")
+	////反射不能获取未导出的字段
+	//printRWer(rwer1)
 	fmt.Println("GetFastRWer1")
 	//直接获取rtype可以
 	printRWer(rwer2)

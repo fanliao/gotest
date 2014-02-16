@@ -423,7 +423,7 @@ func BenchmarkFastRWerSetValue(b *testing.B) {
 	AreEqual(o.Name, name, b)
 	AreEqual(o.Cash, cash, b)
 	AreEqual(o.Date, date, b)
-	AreEqual(o.Ptr, ptr, b)
+	AreEqual(uintptr(unsafe.Pointer(o.Ptr)), uintptr(unsafe.Pointer(ptr)), b)
 }
 
 func BenchmarkFastSet(b *testing.B) {

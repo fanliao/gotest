@@ -48,10 +48,10 @@ func isNil(a interface{}) (r bool) {
 		}
 	}()
 	if a == nil {
-		fmt.Println("is nil")
+		//fmt.Println("is nil")
 		r = true
 	} else if reflect.ValueOf(a).IsNil() {
-		fmt.Println("is nil, type is", reflect.TypeOf(a))
+		//fmt.Println("is nil, type is", reflect.TypeOf(a))
 		r = true
 	} else {
 		r = false
