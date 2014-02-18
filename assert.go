@@ -18,7 +18,7 @@ type tester interface {
 	Fail()
 }
 
-func AreEqual(actual interface{}, expect interface{}, t tester) {
+func AreEqual(actual interface{}, expect interface{}, t tester) bool {
 	if !equals(actual, expect) {
 		if t != nil {
 			t.Log("Failed! expect", expect, ", actual", actual)
@@ -26,10 +26,14 @@ func AreEqual(actual interface{}, expect interface{}, t tester) {
 		} else {
 			fmt.Println("Failed! expect", expect, ", actual", actual)
 		}
+		return false
+	} else {
+		return true
 	}
+
 }
 
-func AreNotEqual(actual interface{}, expect interface{}, t tester) {
+func AreNotEqual(actual interface{}, expect interface{}, t tester) bool {
 	if equals(actual, expect) {
 		if t != nil {
 			t.Log("Failed! expect", expect, " should be different with actual", actual)
@@ -37,6 +41,9 @@ func AreNotEqual(actual interface{}, expect interface{}, t tester) {
 		} else {
 			fmt.Println("Failed! expect", expect, " should be different with actual", actual)
 		}
+		return true
+	} else {
+		return false
 	}
 }
 
@@ -94,11 +101,12 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 	// if depth > 10 { panic("deepValueEqual") }	// for debugging
 	hard := func(k reflect.Kind) bool {
 		switch k {
-		case reflect.Array, reflect.Map, reflect.Slice, reflect.Struct:
+		case reflect.Array, reflect.Map, reflect.Slice, reflect.Struct, reflect.Ptr:
 			return true
 		}
 		return false
 	}
+	fmt.Println("check", a, b, v1.Type().Kind(), v1.Type().Name())
 	if hard(v1.Type().Kind()) {
 		var v visit
 		if addr1 > addr2 {
@@ -109,6 +117,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		if visited[v] {
 			return true
 		} else {
+			fmt.Println("add", v)
 			visited[v] = true
 		}
 	}
@@ -146,17 +155,20 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 
 	case reflect.Struct:
 		if deep {
+			rwer := GetFastRWer(a)
+			p1, p2 := faceToStruct(a).WordPtr(), faceToStruct(b).WordPtr()
+			fmt.Println("p1, p2", p1, p2)
 			for i := 0; i < v1.NumField(); i++ {
-				fld1, fld2 := v1.Field(i), v2.Field(i)
-				if !v1.CanInterface() {
-					fmt.Println(reflect.TypeOf(a).Field(i).Name, "cannot interface")
-					continue
-				}
+				fld1, fld2 := rwer.Value(p1, i), rwer.Value(p2, i)
+				//if !v1.CanInterface() {
+				//	fmt.Println(reflect.TypeOf(a).Field(i).Name, "cannot interface")
+				//	continue
+				//}
 				if !checkEquals(fld1, fld2, deep, visited) {
 					return false
 				}
 			}
-			return false
+			return true
 		} else {
 			//Each interface{} variable takes up 2 words in memory:
 			//one word for the type of what is contained,
@@ -176,12 +188,17 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		//	return bytesEquals(reflect.Indirect(v1).UnsafeAddr(), reflect.Indirect(v2).UnsafeAddr(), v1.Elem().Type().Size())
 		//} else {
 		if deep {
-			v1.Elem().Type()
-			return checkEquals(v1.Elem(), v2.Elem(), deep, visited)
+			return checkEquals(v1.Elem().Interface(), v2.Elem().Interface(), deep, visited)
 		} else {
 			return a == b
 		}
 		//}
+	case reflect.Interface:
+		if deep {
+			return checkEquals(v1.Elem().Interface(), v2.Elem().Interface(), deep, visited)
+		} else {
+			return a == b
+		}
 	default:
 		return a == b
 	}

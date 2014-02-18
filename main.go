@@ -37,57 +37,57 @@ type RWTestStruct2 struct {
 }
 
 func main() {
-	fmt.Println("Hello World 1122!")
-	//o := &RWTestStruct1{1, "test"}
-	//rw := GetFastRWer(o)
-	//fmt.Println(rw)
+	//fmt.Println("Hello World 1122!")
+	////o := &RWTestStruct1{1, "test"}
+	////rw := GetFastRWer(o)
+	////fmt.Println(rw)
 
-	var a *RWTestStruct2 = &RWTestStruct2{}
-	fmt.Println(a)
-	fmt.Println(uintptr(unsafe.Pointer(a)))
+	//var a *RWTestStruct2 = &RWTestStruct2{}
+	//fmt.Println(a)
+	//fmt.Println(uintptr(unsafe.Pointer(a)))
 
-	b := unsafe.Pointer(&a)
-	fmt.Println("b=", b)
+	//b := unsafe.Pointer(&a)
+	//fmt.Println("b=", b)
 
-	d := *((*[ptrSize]byte)(b))
-	fmt.Println("d = ", d)
-	fmt.Println("step 2")
+	//d := *((*[ptrSize]byte)(b))
+	//fmt.Println("d = ", d)
+	//fmt.Println("step 2")
 
-	v := reflect.Indirect(reflect.ValueOf(*a))
-	t := v.Type()
+	//v := reflect.Indirect(reflect.ValueOf(*a))
+	//t := v.Type()
 
-	for i := 0; i < t.NumField(); i++ {
-		fType := t.Field(i)
-		f := v.Field(i)
-		fmt.Println(fType.Name, f.Type().Size(), f.Type())
-	}
-
-	benchmarkFastRWerSetValueByName()
-	flag.Parse()
-
-	f := 22.22
-	fmt.Printf("float64 二进制：%b\n", f)
-	fmt.Printf("float32 二进制：%b\n", float32(f))
-	////if *cpuprofile != "" {
-	//f, err := os.Create("profile_file")
-	//if err != nil {
-	//	log.Fatal(err)
+	//for i := 0; i < t.NumField(); i++ {
+	//	fType := t.Field(i)
+	//	f := v.Field(i)
+	//	fmt.Println(fType.Name, f.Type().Size(), f.Type())
 	//}
-	//pprof.StartCPUProfile(f)
-	//defer pprof.StopCPUProfile()
-	benchmarkFastRWerGet(500000)
-	//benchmarkFastRWerGetValue(500000)
-	////}
-	////var s string
-	////s = nil
-	////fmt.Println(s)
 
-	//testFuture()
+	//benchmarkFastRWerSetValueByName()
+	//flag.Parse()
+
+	//f := 22.22
+	//fmt.Printf("float64 二进制：%b\n", f)
+	//fmt.Printf("float32 二进制：%b\n", float32(f))
+	//////if *cpuprofile != "" {
+	////f, err := os.Create("profile_file")
+	////if err != nil {
+	////	log.Fatal(err)
+	////}
+	////pprof.StartCPUProfile(f)
+	////defer pprof.StopCPUProfile()
+	//benchmarkFastRWerGet(500000)
+	////benchmarkFastRWerGetValue(500000)
+	//////}
+	//////var s string
+	//////s = nil
+	//////fmt.Println(s)
+
+	////testFuture()
 
 	i := 12
 	fmt.Println("type of unsafe.pointer is", reflect.TypeOf(unsafe.Pointer(&i)).Kind())
 	//testStructUnsafeCode()
-	//testCompare()
+	testCompare()
 	testKind()
 
 	testRWUnexported()
@@ -228,20 +228,6 @@ func printInterfaceLayout(a interface{}) {
 
 }
 
-type st struct {
-	a int
-}
-
-type st1 struct {
-	a int
-	b int
-}
-
-type st2 struct {
-	a int
-	b map[int]int
-}
-
 func testRWUnexported() {
 	fmt.Println()
 	s1 := RWTestStruct1{10, "hello", 20}
@@ -297,65 +283,136 @@ func testStructUnsafeCode() {
 	fmt.Println()
 }
 
+type st struct {
+	a int
+}
+
+type st1 struct {
+	A int
+	b int
+}
+
+type st2 struct {
+	A int
+	b map[int]int
+}
+
+type st3 struct {
+	A int
+	s *st3
+}
+
 func testCompare() {
-	m11 := map[int]int{1: 1}
-	m22 := map[int]int64{1: 1}
-	fmt.Println(reflect.TypeOf(m11), reflect.TypeOf(m22), reflect.TypeOf(m11) == reflect.TypeOf(m22))
+	//f := func() {}
+	//m1 := make(map[int]int)
+	//m2 := make(map[int]int)
+	//m3 := map[int]int{1: 1, 2: 2}
+	//m4 := map[int]int{1: 1, 2: 2}
+	//arr1 := [2]int{1, 2}
+	//arr2 := [2]int{1, 2}
+	//ch := make(chan int)
+	//sl1 := []int{1, 2}
+	//sl2 := []int{1, 2}
+	//var i1 interface{} = m1
+	//var i2 interface{} = m2
+	//st11 := st1{2, 3454}
+	//st12 := st1{2, 3454}
 
-	f := func() {
+	//st21, st22 := st2{}, st2{}
+	//st21.b = map[int]int{1: 1, 2: 2}
+	//st22.b = map[int]int{1: 1, 2: 2}
 
-	}
-	m1 := make(map[int]int)
-	m2 := make(map[int]int)
-	m3 := map[int]int{1: 1, 2: 2}
-	m4 := map[int]int{1: 1, 2: 2}
-	arr1 := [2]int{1, 2}
-	arr2 := [2]int{1, 2}
-	ch := make(chan int)
-	sl1 := []int{1, 2}
-	sl2 := []int{1, 2}
-	var i interface{} = m1
-	st11 := st1{2, 3454}
-	st12 := st1{2, 3454}
+	st31, st32 := st3{1, nil}, st3{1, nil}
+	st31.s = &st31
+	st32.s = &st32
 
 	testdatas := [][]interface{}{
-		{nil, nil, true},
-		{nil, "a", false},
-		{"a", "a", true},
-		{1, "1", false},
-		{1, 1, true},
-		{arr1, arr2, true},
-		{m1, m2, true},
-		{m3, m4, true},
-		{f, f, true},
-		{sl1, sl2, true},
-		{ch, ch, true},
-		{&m1, &m2, false},
-		{&m1, &m1, true},
-		{i, i, true},
-		{st{64}, st{64}, true},
-		{st11, st12, true},
-		{st2{1, m1}, st2{1, m1}, true},
-		{st2{1, m1}, st2{1, m2}, false},
-		{&st11, &st12, false},
+		//{nil, nil, false, true}, //测试nil与nil
+		//{nil, "a", false, false},
+		//{"a", "a", false, true},
+		//{1, "1", false, false}, //不进行类型转换
+		//{1, 1, false, true},
+		//{arr1, arr2, false, true}, //equals比较内容，所以返回true
+		//{m1, m2, false, true},
+		//{m3, m4, false, true},
+		//{f, f, false, true},
+		//{sl1, sl2, false, true},
+		//{ch, ch, false, true},
+		//{&m1, &m2, false, false},
+		//{&m1, &m2, true, true}, //*
+		//{&m1, &m1, false, true},
+		//{&m1, &m1, true, true}, //*
+		//{i1, i1, false, true},
+		//{i1, i2, false, true},
+		//{i1, i2, true, true},
+		//{st{64}, st{64}, false, true},
+		//{st11, st12, false, true},
+		//{st1{2, 200}, st1{2, 100}, false, false},
+		//{st2{1, m1}, st2{1, m1}, false, true},
+		//{st2{1, m1}, st2{1, m2}, true, true},
+		//{st21, st22, false, false}, //不进行深度比较的情况下，st21与st22应该不相等，因为2个包含的map对象不同，虽然map的内容相同
+		//{st21, st22, true, true},   //进行深度比较的情况下，st21与st22应该相等，因为2个包含的map的内容相同
+		//{&st11, &st12, false, false},
+		//{&st11, &st12, true, true},
+		//{&st31, &st32, false, false},
+		{&st31, &st32, true, true}, //检查递归关联的处理
 	}
-	f1 := func(a interface{}, b interface{}) (r bool) {
+	checkError := func(e interface{}) bool {
+		//err := e.(error)
+		if e != nil {
+			fmt.Println("error return false2", e)
+			return true
+		} else {
+			return false
+		}
+	}
+	f1 := func(a interface{}, b interface{}, deep bool, test func(a interface{}, b interface{}, deep bool) (bool, bool)) (r bool, valid bool) {
 		defer func() {
-			if e := recover(); e != nil {
-				fmt.Println(e)
+			if e := recover(); checkError(e) {
+				fmt.Println("error return false")
 				r = false
 			}
 		}()
 		//r = a == b
-		r = equals(a, b)
+		r, valid = test(a, b, deep)
 		return
 	}
-	for i, d := range testdatas {
-		r := f1(d[0], d[1])
-		fmt.Println(i, reflect.TypeOf(d[0]), d[0], "=", d[1], r)
-		AreEqual(r, d[2], nil)
+
+	f3 := func(title string, test func(a interface{}, b interface{}, deep bool) (bool, bool)) {
+		fmt.Println(title)
+		for i, d := range testdatas {
+			r, valid := f1(d[0], d[1], d[2].(bool), test)
+			if valid && !AreEqual(r, d[3], nil) {
+				fmt.Println(i, reflect.TypeOf(d[0]), d[0], "=", d[1], r)
+			}
+		}
 		fmt.Println()
 	}
+
+	fmt.Println(uintptr(unsafe.Pointer(&st31)), uintptr(unsafe.Pointer(&st32)))
+	f3("test equal function", func(a interface{}, b interface{}, deep bool) (bool, bool) {
+		return equals(a, b, deep), true
+	})
+
+	f3("test reflect.DeepEqual function", func(a interface{}, b interface{}, deep bool) (bool, bool) {
+		if deep {
+			return reflect.DeepEqual(a, b), true
+		} else {
+			return false, false
+		}
+	})
+
+	//fmt.Println(st21, st22, reflect.DeepEqual(st21, st22))
+	//error, but why DeepEuqal don't throw error?
+	//fmt.Println(i1, i2, i1 == i2)
+
+	//fmt.Println("test reflect.DeepEqual function")
+	//for i, d := range testdatas {
+	//	r := reflect.DeepEqual(d[0], d[1])
+	//	fmt.Println(i, reflect.TypeOf(d[0]), d[0], "=", d[1], r)
+	//	AreEqual(r, d[2], nil)
+	//	fmt.Println()
+	//}
 
 	//测试结果：
 	//uncomparable type：map, func, slice, 以及包含这些类型的struct

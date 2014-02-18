@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	//"fmt"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -81,7 +81,14 @@ func (this *FastRW) Ptr(obj unsafe.Pointer, i int) unsafe.Pointer {
 
 func (this *FastRW) Value(obj unsafe.Pointer, i int) interface{} {
 	fld := this.FieldsByIndex[i]
-	return getValue(fld.typ, unsafe.Pointer(uintptr(obj)+fld.offset))
+	fmt.Println("fld.typ is", *(fld.typ.string))
+	v := getValue(fld.typ, unsafe.Pointer(uintptr(obj)+fld.offset))
+	fmt.Println(v, uintptr(unsafe.Pointer(uintptr(obj)+fld.offset)))
+	if *(fld.typ.string) == "*main.st3" {
+		s := *((*st3)(unsafe.Pointer(uintptr(obj) + fld.offset)))
+		fmt.Println(s)
+	}
+	return v
 }
 
 func (this *FastRW) CopyPtr(obj unsafe.Pointer, i int, target unsafe.Pointer) {
@@ -415,6 +422,18 @@ const (
 type interfaceHeader struct {
 	typ  *rtype
 	word uintptr
+}
+
+func (this interfaceHeader) WordPtr() unsafe.Pointer {
+	if this.typ.Kind() == reflect.Ptr {
+		return unsafe.Pointer(this.word)
+	}
+
+	if this.typ.size > ptrSize {
+		return unsafe.Pointer(this.word)
+	} else {
+		return unsafe.Pointer(&(this.word))
+	}
 }
 
 func faceToDataPtr(i interface{}) uintptr {
