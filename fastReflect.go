@@ -18,10 +18,10 @@ func init() {
 	p := unsafe.Pointer(&x)
 	p2 := (*[ptrSize]byte)(p)
 	if p2[0] == 0 {
-		//fmt.Println("本机器：大端")
+		fmt.Println("本机器：大端")
 		bigEndian = true
 	} else {
-		//fmt.Println("本机器：小端")
+		fmt.Println("本机器：小端")
 		bigEndian = false
 	}
 
@@ -81,13 +81,8 @@ func (this *FastRW) Ptr(obj unsafe.Pointer, i int) unsafe.Pointer {
 
 func (this *FastRW) Value(obj unsafe.Pointer, i int) interface{} {
 	fld := this.FieldsByIndex[i]
-	fmt.Println("fld.typ is", *(fld.typ.string))
 	v := getValue(fld.typ, unsafe.Pointer(uintptr(obj)+fld.offset))
-	fmt.Println(v, uintptr(unsafe.Pointer(uintptr(obj)+fld.offset)))
-	if *(fld.typ.string) == "*main.st3" {
-		s := *((*st3)(unsafe.Pointer(uintptr(obj) + fld.offset)))
-		fmt.Println(s)
-	}
+	//fmt.Printf("layout of getValue is %v, addr is %x\n", faceToStruct(v), uintptr(obj)+fld.offset)
 	return v
 }
 
@@ -448,7 +443,7 @@ func faceToStruct(i interface{}) interfaceHeader {
 
 func toFaceHeader(typ *rtype, ptr unsafe.Pointer) *interfaceHeader {
 	if typ.Kind() == reflect.Ptr {
-		return &interfaceHeader{((*ptrType)(unsafe.Pointer(typ))).elem, uintptr(ptr)}
+		return &interfaceHeader{typ, *((*uintptr)(ptr))}
 	}
 
 	if typ.size > ptrSize {

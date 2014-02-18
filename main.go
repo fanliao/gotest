@@ -356,6 +356,7 @@ func testCompare() {
 		//{&st11, &st12, true, true},
 		//{&st31, &st32, false, false},
 		{&st31, &st32, true, true}, //检查递归关联的处理
+		{st31, st32, true, true},   //检查递归关联的处理
 	}
 	checkError := func(e interface{}) bool {
 		//err := e.(error)
@@ -389,7 +390,6 @@ func testCompare() {
 		fmt.Println()
 	}
 
-	fmt.Println(uintptr(unsafe.Pointer(&st31)), uintptr(unsafe.Pointer(&st32)))
 	f3("test equal function", func(a interface{}, b interface{}, deep bool) (bool, bool) {
 		return equals(a, b, deep), true
 	})

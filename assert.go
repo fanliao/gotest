@@ -84,6 +84,7 @@ func equals(a interface{}, b interface{}, deeps ...bool) bool {
 // A pointer with nil value is equal to nil
 func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool) bool {
 
+	//fmt.Printf("interface layout is %v %v\n", faceToStruct(a), faceToStruct(b))
 	v1, v2 := reflect.ValueOf(a), reflect.ValueOf(b)
 	addr1, addr2 := InterfaceToPtr1(a), InterfaceToPtr1(b)
 
@@ -106,7 +107,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		}
 		return false
 	}
-	fmt.Println("check", a, b, v1.Type().Kind(), v1.Type().Name())
+	//fmt.Printf("check %#v %#v, kind is %v, type is %v, addr is %x %x\n", a, b, v1.Type().Kind(), v1.Type().Name(), addr1, addr2)
 	if hard(v1.Type().Kind()) {
 		var v visit
 		if addr1 > addr2 {
@@ -115,9 +116,10 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 			v = visit{addr1, addr2}
 		}
 		if visited[v] {
+			//fmt.Printf("find %#v\n", v)
 			return true
 		} else {
-			fmt.Println("add", v)
+			//fmt.Printf("add %#v\n", v)
 			visited[v] = true
 		}
 	}
@@ -157,7 +159,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		if deep {
 			rwer := GetFastRWer(a)
 			p1, p2 := faceToStruct(a).WordPtr(), faceToStruct(b).WordPtr()
-			fmt.Println("p1, p2", p1, p2)
+			//fmt.Printf("p1 is %x, p2 is %x\n", p1, p2)
 			for i := 0; i < v1.NumField(); i++ {
 				fld1, fld2 := rwer.Value(p1, i), rwer.Value(p2, i)
 				//if !v1.CanInterface() {
