@@ -419,8 +419,10 @@ type interfaceHeader struct {
 	word uintptr
 }
 
+//WordPtr返回一个指向interface数据的指针
 func (this interfaceHeader) WordPtr() unsafe.Pointer {
 	if this.typ.Kind() == reflect.Ptr {
+		//如果是指针类型，则应该返回一个指向是
 		return unsafe.Pointer(this.word)
 	}
 
@@ -441,14 +443,20 @@ func faceToStruct(i interface{}) interfaceHeader {
 	return s
 }
 
+//根据类型指针和数据指针生成一个interfaceHearder，可以将其转化为1个interface{}
+//数据指针是一个指向
 func toFaceHeader(typ *rtype, ptr unsafe.Pointer) *interfaceHeader {
 	if typ.Kind() == reflect.Ptr {
+		//如果是指针类型，则ptr指向的地址保存的是1个指针，指针的内容是被指向数据的地址
+		//指针的Interface保存类型指针和被指向数据的地址
 		return &interfaceHeader{typ, *((*uintptr)(ptr))}
 	}
 
 	if typ.size > ptrSize {
+		//如果是非指针类型，如果数据size大于一个字，则interface的word应该是数据的地址
 		return &interfaceHeader{typ, uintptr(ptr)}
 	} else {
+		//如果是非指针类型，如果数据size小于等于一个字，则interface的word是数据本身
 		var word uintptr
 		copyVar(uintptr(unsafe.Pointer(&word)), uintptr(ptr), typ.size)
 		return &interfaceHeader{typ, word}

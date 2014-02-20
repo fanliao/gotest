@@ -303,58 +303,58 @@ type st3 struct {
 }
 
 func testCompare() {
-	//f := func() {}
-	//m1 := make(map[int]int)
-	//m2 := make(map[int]int)
-	//m3 := map[int]int{1: 1, 2: 2}
-	//m4 := map[int]int{1: 1, 2: 2}
-	//arr1 := [2]int{1, 2}
-	//arr2 := [2]int{1, 2}
-	//ch := make(chan int)
-	//sl1 := []int{1, 2}
-	//sl2 := []int{1, 2}
-	//var i1 interface{} = m1
-	//var i2 interface{} = m2
-	//st11 := st1{2, 3454}
-	//st12 := st1{2, 3454}
+	f := func() {}
+	m1 := make(map[int]int)
+	m2 := make(map[int]int)
+	m3 := map[int]int{1: 1, 2: 2}
+	m4 := map[int]int{1: 1, 2: 2}
+	arr1 := [2]int{1, 2}
+	arr2 := [2]int{1, 2}
+	ch := make(chan int)
+	sl1 := []int{1, 2}
+	sl2 := []int{1, 2}
+	var i1 interface{} = m1
+	var i2 interface{} = m2
+	st11 := st1{2, 3454}
+	st12 := st1{2, 3454}
 
-	//st21, st22 := st2{}, st2{}
-	//st21.b = map[int]int{1: 1, 2: 2}
-	//st22.b = map[int]int{1: 1, 2: 2}
+	st21, st22 := st2{}, st2{}
+	st21.b = map[int]int{1: 1, 2: 2}
+	st22.b = map[int]int{1: 1, 2: 2}
 
 	st31, st32 := st3{1, nil}, st3{1, nil}
 	st31.s = &st31
 	st32.s = &st32
 
 	testdatas := [][]interface{}{
-		//{nil, nil, false, true}, //测试nil与nil
-		//{nil, "a", false, false},
-		//{"a", "a", false, true},
-		//{1, "1", false, false}, //不进行类型转换
-		//{1, 1, false, true},
-		//{arr1, arr2, false, true}, //equals比较内容，所以返回true
-		//{m1, m2, false, true},
-		//{m3, m4, false, true},
-		//{f, f, false, true},
-		//{sl1, sl2, false, true},
-		//{ch, ch, false, true},
-		//{&m1, &m2, false, false},
-		//{&m1, &m2, true, true}, //*
-		//{&m1, &m1, false, true},
-		//{&m1, &m1, true, true}, //*
-		//{i1, i1, false, true},
-		//{i1, i2, false, true},
-		//{i1, i2, true, true},
-		//{st{64}, st{64}, false, true},
-		//{st11, st12, false, true},
-		//{st1{2, 200}, st1{2, 100}, false, false},
-		//{st2{1, m1}, st2{1, m1}, false, true},
-		//{st2{1, m1}, st2{1, m2}, true, true},
-		//{st21, st22, false, false}, //不进行深度比较的情况下，st21与st22应该不相等，因为2个包含的map对象不同，虽然map的内容相同
-		//{st21, st22, true, true},   //进行深度比较的情况下，st21与st22应该相等，因为2个包含的map的内容相同
-		//{&st11, &st12, false, false},
-		//{&st11, &st12, true, true},
-		//{&st31, &st32, false, false},
+		{nil, nil, false, true}, //测试nil与nil
+		{nil, "a", false, false},
+		{"a", "a", false, true},
+		{1, "1", false, false}, //不进行类型转换
+		{1, 1, false, true},
+		{arr1, arr2, false, true}, //equals比较内容，所以返回true
+		{m1, m2, false, true},
+		{m3, m4, false, true},
+		{f, f, false, true},
+		{sl1, sl2, false, true},
+		{ch, ch, false, true},
+		{&m1, &m2, false, false},
+		{&m1, &m2, true, true}, //*
+		{&m1, &m1, false, true},
+		{&m1, &m1, true, true}, //*
+		{i1, i1, false, true},
+		{i1, i2, false, true},
+		{i1, i2, true, true},
+		{st{64}, st{64}, false, true},
+		{st11, st12, false, true},
+		{st1{2, 200}, st1{2, 100}, false, false},
+		{st2{1, m1}, st2{1, m1}, false, true},
+		{st2{1, m1}, st2{1, m2}, true, true},
+		{st21, st22, false, false}, //不进行深度比较的情况下，st21与st22应该不相等，因为2个包含的map对象不同，虽然map的内容相同
+		{st21, st22, true, true},   //进行深度比较的情况下，st21与st22应该相等，因为2个包含的map的内容相同
+		{&st11, &st12, false, false},
+		{&st11, &st12, true, true},
+		{&st31, &st32, false, false},
 		{&st31, &st32, true, true}, //检查递归关联的处理
 		{st31, st32, true, true},   //检查递归关联的处理
 	}
