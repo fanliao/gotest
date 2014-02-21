@@ -422,22 +422,25 @@ type interfaceHeader struct {
 //WordPtr返回一个指向interface数据的指针
 func (this interfaceHeader) WordPtr() unsafe.Pointer {
 	if this.typ.Kind() == reflect.Ptr {
-		//如果是指针类型，则应该返回一个指向是
+		//如果是指针类型，则this.word就是数据的地址
 		return unsafe.Pointer(this.word)
 	}
 
 	if this.typ.size > ptrSize {
+		//如果是非指针类型并且数据size大于一个字，则interface的word是数据的地址
 		return unsafe.Pointer(this.word)
 	} else {
+		//如果是非指针类型并且数据size小于等于一个字，则interface的word是数据本身
 		return unsafe.Pointer(&(this.word))
 	}
 }
 
-func faceToDataPtr(i interface{}) uintptr {
-	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
-	return s.word
-}
+//func faceToDataPtr(i interface{}) uintptr {
+//	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
+//	return s.word
+//}
 
+//将interface转换为一个struct
 func faceToStruct(i interface{}) interfaceHeader {
 	s := *((*interfaceHeader)(unsafe.Pointer(&i)))
 	return s
@@ -453,10 +456,10 @@ func toFaceHeader(typ *rtype, ptr unsafe.Pointer) *interfaceHeader {
 	}
 
 	if typ.size > ptrSize {
-		//如果是非指针类型，如果数据size大于一个字，则interface的word应该是数据的地址
+		//如果是非指针类型并且数据size大于一个字，则interface的word是数据的地址
 		return &interfaceHeader{typ, uintptr(ptr)}
 	} else {
-		//如果是非指针类型，如果数据size小于等于一个字，则interface的word是数据本身
+		//如果是非指针类型并且数据size小于等于一个字，则interface的word是数据本身
 		var word uintptr
 		copyVar(uintptr(unsafe.Pointer(&word)), uintptr(ptr), typ.size)
 		return &interfaceHeader{typ, word}
