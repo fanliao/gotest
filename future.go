@@ -174,7 +174,6 @@ func (this *Future) start() {
 			pipeFuture.targetFuture = target
 		}
 	}
-	fmt.Println("is received")
 }
 
 //set this.r
@@ -189,7 +188,6 @@ func (this *Future) execCallback(r *futureResult) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.r = r
-	fmt.Println("callback")
 	execCallback(r, this.dones, this.fails, this.always)
 }
 
@@ -232,9 +230,9 @@ func (this *Future) batchCallback(dones []func(v ...interface{}), fails []func(v
 	return this.addCallback(proxyAction, pendingAction, finalAction)
 }
 
-//处理单个回调函数的添加请求
+//处理单个回调函数的添加请求p
 func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbackType) {
-	f := this.addOneCallback(callback, CALLBACK_DONE)
+	f := this.addOneCallback(callback, t)
 	if f != nil {
 		f()
 	}
@@ -287,6 +285,29 @@ func (this *Future) addCallback(proxyAction func(*Future), pendingAction func(),
 			finalAction(r)
 		}
 	}
+}
+
+func Submit(action func() []interface{}) *Future {
+	fu := NewFuture()
+
+	go func() {
+		defer func() {
+			e := recover()
+			fu.Reject(e)
+		}()
+
+		r := action()
+		fu.Reslove(r...)
+	}()
+
+	return fu
+}
+
+func Submit0(action func()) *Future {
+	return Submit(func() []interface{} {
+		action()
+		return make([]interface{}, 0, 0)
+	})
 }
 
 //Factory function for future

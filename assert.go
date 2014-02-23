@@ -94,7 +94,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 	}
 
 	if v1.Type() != v2.Type() {
-		//fmt.Println("type isnot same", a, b, v1.Type().Kind(), v2.Type().Kind())
+		fmt.Println("type isnot same", a, b, v1.Type(), v2.Type())
 		return false
 	}
 
@@ -142,6 +142,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		return true
 	case reflect.Slice:
 		if v1.Len() != v2.Len() {
+			fmt.Printf("the len of %v is %v, the len of %v is %v\n", v1, v1.Len(), v2, v2.Len())
 			return false
 		} else {
 			for i := 0; i < v1.Len(); i++ {
