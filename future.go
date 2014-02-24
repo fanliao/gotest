@@ -51,14 +51,16 @@ type Future struct {
 }
 
 //Get函数将一直阻塞直到任务完成,返回任务的结果
-//只能Get一次，多次Get将返回nil, false
-func (this *Future) Get() (r []interface{}, ok bool) {
+//如果Get多次，后续的Get将直接返回任务结果
+func (this *Future) Get() ([]interface{}, bool) {
 	if fr, ok := <-this.chOut; ok {
-		r = fr.result
+		return fr.result, fr.ok
 	} else {
-		r = nil
+		this.lock.Lock()
+		r, ok := this.r.result, this.r.ok
+		this.lock.Unlock()
+		return r, ok
 	}
-	return
 }
 
 //Reslove表示任务正常完成
@@ -146,13 +148,14 @@ func (this *Future) getPipe() (func(v ...interface{}) *Future, func(v ...interfa
 //启动一个异步goroutine监控任务完成
 func (this *Future) start() {
 	r := <-this.chIn
-	//任务完成后调用回调函数
 	this.setResult(r)
-	execCallback(r, this.dones, this.fails, this.always)
 
 	//让Get函数可以返回
 	this.chOut <- r
 	close(this.chOut)
+
+	//任务完成后调用回调函数
+	execCallback(r, this.dones, this.fails, this.always)
 
 	//处理链式异步任务
 	pipeDoneTask, pipeFailTask, pipeFuture := this.getPipe()
