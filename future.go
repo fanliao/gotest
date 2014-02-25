@@ -53,6 +53,11 @@ type Future struct {
 //Get函数将一直阻塞直到任务完成,返回任务的结果
 //如果Get多次，后续的Get将直接返回任务结果
 func (this *Future) Get() ([]interface{}, bool) {
+	if this.targetFuture != nil {
+		return this.targetFuture.Get()
+	} else if this.pipeFuture != nil {
+
+	}
 	if fr, ok := <-this.chOut; ok {
 		return fr.result, fr.ok
 	} else {
@@ -170,11 +175,21 @@ func (this *Future) start() {
 		//target := this.pipeTask(this.r.result...)
 
 		if target != nil {
-			f := target.batchCallback(this.pipeFuture.dones, this.pipeFuture.fails, this.pipeFuture.always)
+			dones, fails, always := this.pipeFuture.dones, this.pipeFuture.fails, this.pipeFuture.always
+			this.pipeFuture.dones = make([]func(v ...interface{}), 0, 0)
+			this.pipeFuture.fails = make([]func(v ...interface{}), 0, 0)
+			this.pipeFuture.always = make([]func(v ...interface{}), 0, 0)
+
+			pipeFuture.targetFuture = target
+			target.Done(func(v ...interface{}) {
+				pipeFuture.Reslove(v...)
+			}).Fail(func(v ...interface{}) {
+				pipeFuture.Reject(v...)
+			})
+			f := target.batchCallback(dones, fails, always)
 			if f != nil {
 				f()
 			}
-			pipeFuture.targetFuture = target
 		}
 	}
 }
@@ -290,6 +305,7 @@ func (this *Future) addCallback(proxyAction func(*Future), pendingAction func(),
 	}
 }
 
+//异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
 func Submit(action func() []interface{}) *Future {
 	fu := NewFuture()
 
@@ -300,6 +316,16 @@ func Submit(action func() []interface{}) *Future {
 		}()
 
 		r := action()
+		if l := len(r); l > 0 {
+			if done, ok := r[l-1].(bool); ok {
+				if done {
+					fu.Reslove(r[:l-1]...)
+				} else {
+					fu.Reject(r[:l-1]...)
+				}
+
+			}
+		}
 		fu.Reslove(r...)
 	}()
 
@@ -330,17 +356,17 @@ func NewFuture() *Future {
 
 //产生一个新的Future，如果列表中任意1个Future完成，则Future完成
 func Any(fs ...*Future) *Future {
-	f := NewFuture()
+	nf := NewFuture()
 
 	for _, f := range fs {
 		f.Done(func(v ...interface{}) {
-			f.Reslove(v...)
+			nf.Reslove(v...)
 		}).Fail(func(v ...interface{}) {
-			f.Reject(v...)
+			nf.Reject(v...)
 		})
 	}
 
-	return f
+	return nf
 }
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Future成功完成，否则失败

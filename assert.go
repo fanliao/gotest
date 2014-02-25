@@ -21,6 +21,7 @@ type tester interface {
 func AreEqual(actual interface{}, expect interface{}, t tester) bool {
 	if !equals(actual, expect) {
 		if t != nil {
+			//fmt.Println("t=", t)
 			t.Log("Failed! expect", expect, ", actual", actual)
 			t.Fail()
 		} else {
