@@ -39,15 +39,19 @@ type futureResult struct {
 	ok     bool
 }
 
-//Future代表一个异步任务
-type Future struct {
-	lock                       *sync.Mutex
-	chIn, chOut                chan *futureResult
-	dones, fails, always       []func(v ...interface{})
+type pipe struct {
 	pipeDoneTask, pipeFailTask func(v ...interface{}) *Future
 	pipeFuture                 *Future
-	targetFuture               *Future
-	r                          *futureResult
+}
+
+//Future代表一个异步任务
+type Future struct {
+	lock                 *sync.Mutex
+	chIn, chOut          chan *futureResult
+	dones, fails, always []func(v ...interface{})
+	pipe
+	targetFuture *Future
+	r            *futureResult
 }
 
 //Get函数将一直阻塞直到任务完成,返回任务的结果
@@ -55,15 +59,12 @@ type Future struct {
 func (this *Future) Get() ([]interface{}, bool) {
 	if this.targetFuture != nil {
 		return this.targetFuture.Get()
-	} else if this.pipeFuture != nil {
-
 	}
+
 	if fr, ok := <-this.chOut; ok {
 		return fr.result, fr.ok
 	} else {
-		this.lock.Lock()
 		r, ok := this.r.result, this.r.ok
-		this.lock.Unlock()
 		return r, ok
 	}
 }
@@ -75,7 +76,6 @@ func (this *Future) Reslove(v ...interface{}) (e error) {
 	}()
 	r := &futureResult{v, true}
 	this.chIn <- r
-	close(this.chIn)
 	e = nil
 	return
 }
@@ -87,7 +87,7 @@ func (this *Future) Reject(v ...interface{}) (e error) {
 	}()
 	r := &futureResult{v, false}
 	this.chIn <- r
-	close(this.chIn)
+	e = nil
 	return
 }
 
@@ -153,6 +153,7 @@ func (this *Future) getPipe() (func(v ...interface{}) *Future, func(v ...interfa
 //启动一个异步goroutine监控任务完成
 func (this *Future) start() {
 	r := <-this.chIn
+	close(this.chIn)
 	this.setResult(r)
 
 	//让Get函数可以返回
@@ -347,7 +348,7 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
-		nil, nil, nil, nil, nil}
+		pipe{}, nil, nil}
 	go func() {
 		f.start()
 	}()
@@ -377,6 +378,7 @@ func When(fs ...*Future) *Future {
 		allOk := true
 		for _, f := range fs {
 			r, ok := f.Get()
+			r = append(r, ok)
 			rs = append(rs, r)
 			if !ok {
 				allOk = false

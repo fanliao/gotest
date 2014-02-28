@@ -366,10 +366,13 @@ func (v Value) call(op string, in []Value) []Value {
 		rcvr iword
 	)
 	if v.flag&flagMethod != 0 {
+		//方法？
 		t, fn, rcvr = methodReceiver(op, v, int(v.flag)>>flagMethodShift)
 	} else if v.flag&flagIndir != 0 {
+		//函数指针？
 		fn = *(*unsafe.Pointer)(v.val)
 	} else {
+		//什么情况会调用到else？普通函数？
 		fn = v.val
 	}
 

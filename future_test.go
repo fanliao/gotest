@@ -30,6 +30,8 @@ func TestDoneAlways(t *testing.T) {
 	order = append(order, 2)
 	time.Sleep(500 * time.Millisecond)
 	order = append(order, 6)
+	//The code after Get() and the callback will be concurrent run
+	//The always callback always run after all done or fail callbacks be done
 	AreEqual(order, []int{0, 1, 2, 3, 4, 5, 6}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
 	AreEqual(ok, true, t)
@@ -114,6 +116,8 @@ func TestThen(t *testing.T) {
 		return f
 	}
 
+	//for then api, the new Future object will be return
+	//New future task object should be started after current future be done or failed
 	f := SubmitWithCallback(taskDone)
 	order = append(order, 0)
 	r, ok := f.Get()
