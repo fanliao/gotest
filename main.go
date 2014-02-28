@@ -125,6 +125,8 @@ func main() {
 	close(c)
 	time.Sleep(2 * time.Second)
 
+	testMakeFunc()
+
 }
 
 func benchmarkFastRWerGet(n int) {
@@ -204,8 +206,8 @@ func testUnexportedFields(o interface{}) {
 	fmt.Println("reflect numfield=", reflect.ValueOf(o).NumField())
 	f1 := reflect.ValueOf(o).FieldByName("RWTestStruct2")
 	fmt.Println("reflect get", "RWTestStruct2", f1)
-	f2 := reflect.ValueOf(o).FieldByName("Date")
-	fmt.Println("reflect get", "Date", f2)
+	//f2 := reflect.ValueOf(o).FieldByName("Date")
+	//fmt.Println("reflect get", "Date", f2)
 	fmt.Println(*(f.typ.string), f.name, name, f.pkgPath, "\n")
 }
 
@@ -432,4 +434,27 @@ func testCompare() {
 	//测试结果：
 	//uncomparable type：map, func, slice, 以及包含这些类型的struct
 	//其他类型可以比较，并且比较的是变量的byte数组内容，所以2个不同的数组只要内容相同就是相等
+}
+
+func testMakeFunc() {
+	fn := func(i int) int { return i }
+	incr := func(in []reflect.Value) []reflect.Value {
+		return []reflect.Value{reflect.ValueOf(int(in[0].Int() + 1))}
+	}
+	fv := reflect.MakeFunc(reflect.TypeOf(fn), incr)
+	rw := GetFastRWer(fv)
+	flag := rw.Value(unsafe.Pointer(&fv), 2)
+	fmt.Println(flag, flag.(flag1)&flagMethod)
+	reflect.ValueOf(&fn).Elem().Set(fv)
+
+	if r := fn(2); r != 3 {
+		fmt.Printf("Call returned %d, want 3\n", r)
+	}
+	if r := fv.Call([]reflect.Value{reflect.ValueOf(14)})[0].Int(); r != 15 {
+		fmt.Printf("Call returned %d, want 15\n", r)
+	}
+	if r := fv.Interface().(func(int) int)(26); r != 27 {
+		fmt.Printf("Call returned %d, want 27\n", r)
+	}
+
 }
