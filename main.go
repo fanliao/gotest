@@ -444,7 +444,7 @@ func testMakeFunc() {
 	fv := reflect.MakeFunc(reflect.TypeOf(fn), incr)
 	rw := GetFastRWer(fv)
 	flag := rw.Value(unsafe.Pointer(&fv), 2)
-	fmt.Println(flag, flag.(flag1)&flagMethod)
+	fmt.Println(flag)
 	reflect.ValueOf(&fn).Elem().Set(fv)
 
 	if r := fn(2); r != 3 {
