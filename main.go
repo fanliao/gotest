@@ -6,8 +6,9 @@ import (
 	//"log"
 	//"os"
 	//"runtime/pprof"
-	"errors"
+	//"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -85,45 +86,45 @@ func main() {
 
 	////testFuture()
 
-	i := 12
-	fmt.Println("type of unsafe.pointer is", reflect.TypeOf(unsafe.Pointer(&i)).Kind())
+	//i := 12
+	//fmt.Println("type of unsafe.pointer is", reflect.TypeOf(unsafe.Pointer(&i)).Kind())
 	//testStructUnsafeCode()
 	//testCompare()
 	//testKind()
 
 	//testRWUnexported()
-	_ = RWTestStruct3{}
+	//_ = RWTestStruct3{}
 
-	testUnexportedFields(RWTestStruct3{})
+	//testUnexportedFields(RWTestStruct3{})
 
-	c := make(chan int, 1)
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				s, ok := err.(error)
-				if ok {
-					e := errors.New(s.Error())
-					fmt.Println(e.Error())
-				} else {
-					e := errors.New("")
-					fmt.Println(e.Error())
-				}
-			}
+	//c := make(chan int, 1)
+	//go func() {
+	//	defer func() {
+	//		if err := recover(); err != nil {
+	//			s, ok := err.(error)
+	//			if ok {
+	//				e := errors.New(s.Error())
+	//				fmt.Println(e.Error())
+	//			} else {
+	//				e := errors.New("")
+	//				fmt.Println(e.Error())
+	//			}
+	//		}
 
-		}()
-		c <- 1
-		fmt.Println("send 1")
-		c <- 2
-		fmt.Println("send 2")
-		time.Sleep(1 * time.Second)
-		c <- 3
+	//	}()
+	//	c <- 1
+	//	fmt.Println("send 1")
+	//	c <- 2
+	//	fmt.Println("send 2")
+	//	time.Sleep(1 * time.Second)
+	//	c <- 3
 
-	}()
+	//}()
 
-	fmt.Println(<-c)
-	time.Sleep(1 * time.Second)
-	close(c)
-	time.Sleep(2 * time.Second)
+	//fmt.Println(<-c)
+	//time.Sleep(1 * time.Second)
+	//close(c)
+	//time.Sleep(2 * time.Second)
 
 	testMakeFunc()
 
@@ -436,6 +437,17 @@ func testCompare() {
 	//其他类型可以比较，并且比较的是变量的byte数组内容，所以2个不同的数组只要内容相同就是相等
 }
 
+type methodTestStruct struct {
+	a int
+}
+
+func (this methodTestStruct) Test() string {
+	return strconv.Itoa(this.a) + "_test"
+}
+
+type func0 func() string
+type func1 func(methodTestStruct) string
+
 func testMakeFunc() {
 	fn := func(i int) int { return i }
 	incr := func(in []reflect.Value) []reflect.Value {
@@ -444,9 +456,22 @@ func testMakeFunc() {
 	fv := reflect.MakeFunc(reflect.TypeOf(fn), incr)
 	rw := GetFastRWer(fv)
 	flag := rw.Value(unsafe.Pointer(&fv), 2)
-	fmt.Println(flag)
+	fmt.Printf("%b %v\n", flag, flagMethod)
 	reflect.ValueOf(&fn).Elem().Set(fv)
 
+	//// Method on non-interface type
+	//type method struct {
+	//	name    *string        // name of method
+	//	pkgPath *string        // nil for exported Names; otherwise import path
+	//	mtyp    *rtype         // method type (without receiver)
+	//	typ     *rtype         // .(*FuncType) underneath (with receiver)
+	//	ifn     unsafe.Pointer // fn used in interface call (one-word receiver)
+	//	tfn     unsafe.Pointer // fn used for normal method call
+	//}
+
+	//fmt.Printf("&method.tfn is %#v\n", &m.tfn)
+	//f0 := *(*func1)(unsafe.Pointer(&m.tfn))
+	//fmt.Println(f0(obj))
 	if r := fn(2); r != 3 {
 		fmt.Printf("Call returned %d, want 3\n", r)
 	}
@@ -456,5 +481,52 @@ func testMakeFunc() {
 	if r := fv.Interface().(func(int) int)(26); r != 27 {
 		fmt.Printf("Call returned %d, want 27\n", r)
 	}
+
+	obj := methodTestStruct{}
+	st := *(*structType)(unsafe.Pointer(faceToStruct(obj).typ))
+	fmt.Printf("uncommonType is %#v\n\n", *st.uncommonType)
+	m := (*st.uncommonType).methods[0]
+	fmt.Printf("method.m.name,*m.pkgPath is %#v, %#v\n", *m.name, m.pkgPath)
+	fmt.Printf("method.tfn,m.ifn is %#v, %#v\n", m.tfn, m.ifn)
+	fmt.Printf("method.mtyp is %#v, %#v\n", *m.mtyp, *m.mtyp.string)
+	fmt.Printf("method.typ is %#v, %#v\n", *m.typ, *m.typ.string)
+
+	rm := reflect.TypeOf(obj).Method(0)
+	fmt.Println(rm.Func.Call([]reflect.Value{reflect.ValueOf(obj)}))
+
+	newTest := func(in []reflect.Value) []reflect.Value {
+		s := "ioc"
+		return []reflect.Value{reflect.ValueOf(s)}
+	}
+	iocFunc := reflect.MakeFunc(rm.Func.Type(), newTest)
+	fmt.Println(iocFunc, iocFunc.Call([]reflect.Value{reflect.ValueOf(obj)}))
+	rmf := rm.Func
+	mv := *(*MyValue)(unsafe.Pointer(&rmf))
+	fmt.Println(mv, *(*unsafe.Pointer)(mv.val))
+	mv.flag1 = mv.flag1 | flagAddr
+	rmf = *(*reflect.Value)(unsafe.Pointer(&mv))
+	rmf.Set(iocFunc)
+	//rm.Func.Set(fv)
+
+	//func (t *uncommonType) Method(i int) (m Method) {
+	//	if t == nil || i < 0 || i >= len(t.methods) {
+	//		panic("reflect: Method index out of range")
+	//	}
+	//	p := &t.methods[i]
+	//	if p.name != nil {
+	//		m.Name = *p.name
+	//	}
+	//	fl := flag(Func) << flagKindShift
+	//	if p.pkgPath != nil {
+	//		m.PkgPath = *p.pkgPath
+	//		fl |= flagRO
+	//	}
+	//	mt := p.typ
+	//	m.Type = mt
+	//	fn := unsafe.Pointer(&p.tfn)
+	//	m.Func = Value{mt, fn, fl}
+	//	m.Index = i
+	//	return
+	//}
 
 }

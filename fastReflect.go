@@ -413,6 +413,39 @@ const (
 	kindNoPointers = 0x80
 )
 
+type MyValue struct {
+	// typ holds the type of the value represented by a Value.
+	typ *rtype
+
+	// val holds the 1-word representation of the value.
+	// If flag's flagIndir bit is set, then val is a pointer to the data.
+	// Otherwise val is a word holding the actual data.
+	// When the data is smaller than a word, it begins at
+	// the first byte (in the memory address sense) of val.
+	// We use unsafe.Pointer so that the garbage collector
+	// knows that val could be a pointer.
+	val unsafe.Pointer
+
+	// flag holds metadata about the value.
+	// The lowest bits are flag bits:
+	//	- flagRO: obtained via unexported field, so read-only
+	//	- flagIndir: val holds a pointer to the data
+	//	- flagAddr: v.CanAddr is true (implies flagIndir)
+	//	- flagMethod: v is a method value.
+	// The next five bits give the Kind of the value.
+	// This repeats typ.Kind() except for method values.
+	// The remaining 23+ bits give a method number for method values.
+	// If flag.kind() != Func, code can assume that flagMethod is unset.
+	// If typ.size > ptrSize, code can assume that flagIndir is set.
+	flag1
+
+	// A method value represents a curried method invocation
+	// like r.Read for some receiver r.  The typ+val+flag bits describe
+	// the receiver r, but the flag's Kind bits say Func (methods are
+	// functions), and the top bits of the flag give the method number
+	// in r's type's method table.
+}
+
 // interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
 type interfaceHeader struct {
 	typ  *rtype
@@ -470,22 +503,42 @@ func toFace(eface *interfaceHeader) interface{} {
 	return *((*interface{})(unsafe.Pointer(eface)))
 }
 
+// Method on non-interface type
+type method struct {
+	name    *string        // name of method
+	pkgPath *string        // nil for exported Names; otherwise import path
+	mtyp    *rtype         // method type (without receiver)
+	typ     *rtype         // .(*FuncType) underneath (with receiver)
+	ifn     unsafe.Pointer // fn used in interface call (one-word receiver)
+	tfn     unsafe.Pointer // fn used for normal method call
+}
+
+// uncommonType is present only for types with names or methods
+// (if T is a named type, the uncommonTypes for T and *T have methods).
+// Using a pointer to this struct reduces the overall size required
+// to describe an unnamed type with no methods.
+type uncommonType struct {
+	name    *string  // name of type
+	pkgPath *string  // import path; nil for built-in types like int, string
+	methods []method // methods associated with type
+}
+
 // rtype is the common implementation of most values.
 // It is embedded in other, public struct types, but always
 // with a unique tag like `reflect:"array"` or `reflect:"ptr"`
 // so that code cannot convert from, say, *arrayType to *ptrType.
 type rtype struct {
-	size              uintptr        // size in bytes
-	hash              uint32         // hash of type; avoids computation in hash tables
-	_                 uint8          // unused/padding
-	align             uint8          // alignment of variable with this type
-	fieldAlign        uint8          // alignment of struct field with this type
-	kind              uint8          // enumeration for C
-	alg               *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
-	gc                unsafe.Pointer // garbage collection data
-	string            *string        // string form; unnecessary but undeniably useful
-	ptrToUncommonType uintptr        // (relatively) uncommon fields
-	ptrToThis         *rtype         // type for pointer to this type, if used in binary or has methods
+	size          uintptr        // size in bytes
+	hash          uint32         // hash of type; avoids computation in hash tables
+	_             uint8          // unused/padding
+	align         uint8          // alignment of variable with this type
+	fieldAlign    uint8          // alignment of struct field with this type
+	kind          uint8          // enumeration for C
+	alg           *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
+	gc            unsafe.Pointer // garbage collection data
+	string        *string        // string form; unnecessary but undeniably useful
+	*uncommonType                // (relatively) uncommon fields
+	ptrToThis     *rtype         // type for pointer to this type, if used in binary or has methods
 }
 
 func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
