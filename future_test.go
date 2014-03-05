@@ -5,150 +5,167 @@ import (
 	"time"
 )
 
-func TestDoneAlways(t *testing.T) {
+const (
+	TASK_END      = "task be end,"
+	CALL_DONE     = "callback done,"
+	CALL_FAIL     = "callback fail,"
+	CALL_ALWAYS   = "callback always,"
+	WAIT_TASK     = "wait task end,"
+	GET           = "get task result,"
+	DONE_THEN_END = "task then done be end,"
+	FAIL_THEN_END = "task then fail be end,"
+)
 
-	order := make([]int, 0, 10)
-	task := func() []interface{} {
-		time.Sleep(500 * time.Millisecond)
-		order = append(order, 1)
-		return []interface{}{10, "ok", true}
-	}
-	f := Submit(task).Done(func(v ...interface{}) {
-		time.Sleep(200 * time.Millisecond)
-		order = append(order, 3)
-		AreEqual(v, []interface{}{10, "ok"}, t)
-	}).Always(func(v ...interface{}) {
-		order = append(order, 5)
-		AreEqual(v, []interface{}{10, "ok"}, t)
-	}).Done(func(v ...interface{}) {
-		order = append(order, 4)
-		AreEqual(v, []interface{}{10, "ok"}, t)
-	})
+var order []string
+var tObj *testing.T
 
-	order = append(order, 0)
-	r, ok := f.Get()
-	order = append(order, 2)
+var taskDone func() []interface{} = func() []interface{} {
 	time.Sleep(500 * time.Millisecond)
-	order = append(order, 6)
+	order = append(order, TASK_END)
+	tObj.Log("call task done")
+	return []interface{}{10, "ok", true}
+}
+var taskFail func() []interface{} = func() []interface{} {
+	time.Sleep(500 * time.Millisecond)
+	order = append(order, TASK_END)
+	tObj.Log("call task fail")
+	return []interface{}{10, "fail", false}
+}
+
+var done func(v ...interface{}) = func(v ...interface{}) {
+	time.Sleep(50 * time.Millisecond)
+	order = append(order, CALL_DONE)
+	AreEqual(v, []interface{}{10, "ok"}, tObj)
+}
+var alwaysForDone func(v ...interface{}) = func(v ...interface{}) {
+	order = append(order, CALL_ALWAYS)
+	AreEqual(v, []interface{}{10, "ok"}, tObj)
+}
+var fail func(v ...interface{}) = func(v ...interface{}) {
+	time.Sleep(50 * time.Millisecond)
+	order = append(order, CALL_FAIL)
+	AreEqual(v, []interface{}{10, "fail"}, tObj)
+}
+var alwaysForFail func(v ...interface{}) = func(v ...interface{}) {
+	order = append(order, CALL_ALWAYS)
+	AreEqual(v, []interface{}{10, "fail"}, tObj)
+}
+
+func TestDoneAlways(t *testing.T) {
+	tObj = t
+	order = make([]string, 0, 10)
+	f := Submit(taskDone).Done(done).Always(alwaysForDone).Done(done)
+
+	r, ok := f.Get()
+	order = append(order, GET)
 	//The code after Get() and the callback will be concurrent run
-	//The always callback always run after all done or fail callbacks be done
-	AreEqual(order, []int{0, 1, 2, 3, 4, 5, 6}, t)
+	//So sleep 500 ms to wait all callback be done
+	time.Sleep(500 * time.Millisecond)
+
+	//The always callback run after all done or fail callbacks be done
+	AreEqual(order, []string{TASK_END, GET, CALL_DONE, CALL_DONE, CALL_ALWAYS}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
 	AreEqual(ok, true, t)
+
+	//if task be done, the callback function will be immediately called
+	f.Done(done).Fail(fail)
+	AreEqual(order, []string{TASK_END, GET, CALL_DONE, CALL_DONE, CALL_ALWAYS, CALL_DONE}, t)
 }
 
 func TestFailAlways(t *testing.T) {
-	order := make([]int, 0, 10)
-	task := func() []interface{} {
-		time.Sleep(500 * time.Millisecond)
-		order = append(order, 1)
-		return []interface{}{10, "fail", false}
-	}
-	f := Submit(task).Fail(func(v ...interface{}) {
-		time.Sleep(200 * time.Millisecond)
-		order = append(order, 3)
-		AreEqual(v, []interface{}{10, "fail"}, t)
-	}).Always(func(v ...interface{}) {
-		order = append(order, 5)
-		AreEqual(v, []interface{}{10, "fail"}, t)
-	}).Fail(func(v ...interface{}) {
-		order = append(order, 4)
-		AreEqual(v, []interface{}{10, "fail"}, t)
-	})
+	tObj = t
+	order = make([]string, 0, 10)
+	f := Submit(taskFail).Fail(fail).Always(alwaysForFail).Fail(fail)
 
-	order = append(order, 0)
 	r, ok := f.Get()
-	order = append(order, 2)
+	order = append(order, GET)
 	time.Sleep(500 * time.Millisecond)
-	order = append(order, 6)
-	AreEqual(order, []int{0, 1, 2, 3, 4, 5, 6}, t)
+
+	AreEqual(order, []string{TASK_END, GET, CALL_FAIL, CALL_FAIL, CALL_ALWAYS}, t)
 	AreEqual(r, []interface{}{10, "fail"}, t)
 	AreEqual(ok, false, t)
+
 }
 
-func TestThen(t *testing.T) {
-	order := make([]int, 0, 10)
-	taskDone := func() []interface{} {
-		time.Sleep(500 * time.Millisecond)
-		order = append(order, 1)
-		return []interface{}{10, "ok", true}
+func TestThenWhenDone(t *testing.T) {
+	tObj = t
+	taskDoneThen := func(v ...interface{}) *Future {
+		return Submit(func() []interface{} {
+			time.Sleep(100 * time.Millisecond)
+			order = append(order, DONE_THEN_END)
+			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
+		})
 	}
-	taskFail := func() []interface{} {
-		time.Sleep(500 * time.Millisecond)
-		order = append(order, 1)
-		return []interface{}{10, "fail", false}
+
+	taskFailThen := func(v ...interface{}) *Future {
+		return Submit(func() []interface{} {
+			time.Sleep(100 * time.Millisecond)
+			order = append(order, FAIL_THEN_END)
+			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", false}
+		})
 	}
 
 	SubmitWithCallback := func(task func() []interface{}) *Future {
-		f := Submit(task).Done(func(v ...interface{}) {
-			time.Sleep(200 * time.Millisecond)
-			order = append(order, 2)
-			AreEqual(v, []interface{}{10, "ok"}, t)
-		}).Fail(func(v ...interface{}) {
-			time.Sleep(200 * time.Millisecond)
-			order = append(order, 2)
-			AreEqual(v, []interface{}{10, "fail"}, t)
-		}).Then(func(v ...interface{}) *Future {
-			AreEqual(v, []interface{}{10, "ok"}, t)
-			f1 := Submit(func() []interface{} {
-				time.Sleep(500 * time.Millisecond)
-				order = append(order, 3)
-				return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
-			})
-			return f1
-		}, func(v ...interface{}) *Future {
-			AreEqual(v, []interface{}{10, "fail"}, t)
-			f1 := Submit(func() []interface{} {
-				time.Sleep(500 * time.Millisecond)
-				order = append(order, 3)
-				return []interface{}{v[0].(int) * 2, v[1].(string) + "2", false}
-			})
-			return f1
-		}).Done(func(v ...interface{}) {
-			time.Sleep(100 * time.Millisecond)
-			order = append(order, 5)
-			AreEqual(v, []interface{}{20, "ok2"}, t)
-		}).Fail(func(v ...interface{}) {
-			time.Sleep(100 * time.Millisecond)
-			order = append(order, 5)
-			AreEqual(v, []interface{}{20, "fail2"}, t)
-		})
-		return f
+		return Submit(task).Done(done).Fail(fail).
+			Then(taskDoneThen, taskFailThen)
 	}
 
-	//for then api, the new Future object will be return
-	//New future task object should be started after current future be done or failed
+	//test Done branch for Then function
+	order = make([]string, 0, 10)
 	f := SubmitWithCallback(taskDone)
-	order = append(order, 0)
 	r, ok := f.Get()
-	order = append(order, 4)
+	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
-	order = append(order, 6)
-	AreEqual(order, []int{0, 1, 2, 3, 4, 5, 6}, t)
+
+	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_THEN_END, GET}, t)
 	AreEqual(r, []interface{}{20, "ok2"}, t)
 	AreEqual(ok, true, t)
 
-	order = make([]int, 0, 10)
+	//test fail branch for Then function
+	order = make([]string, 0, 10)
 	f = SubmitWithCallback(taskFail)
-	order = append(order, 0)
 	r, ok = f.Get()
-	order = append(order, 4)
+	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
-	order = append(order, 6)
-	AreEqual(order, []int{0, 1, 2, 3, 4, 5, 6}, t)
+
+	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_THEN_END, GET}, t)
 	AreEqual(r, []interface{}{20, "fail2"}, t)
 	AreEqual(ok, false, t)
 
 }
 
 func TestException(t *testing.T) {
+	order = make([]string, 0, 10)
+	task := func() []interface{} {
+		time.Sleep(500 * time.Millisecond)
+		order = append(order, "task be end,")
+		panic("exception")
+		return []interface{}{10, "ok", true}
+	}
+
+	f := Submit(task).Done(func(v ...interface{}) {
+		time.Sleep(200 * time.Millisecond)
+		order = append(order, "run Done callback,")
+	}).Always(func(v ...interface{}) {
+		order = append(order, "run Always callback,")
+		AreEqual(v, []interface{}{"exception"}, t)
+	}).Fail(func(v ...interface{}) {
+		order = append(order, "run Fail callback,")
+		AreEqual(v, []interface{}{"exception"}, t)
+	})
+
+	r, ok := f.Get()
+	time.Sleep(200 * time.Millisecond)
+	AreEqual(order, []string{"task be end,", "run Fail callback,", "run Always callback,"}, t)
+	AreEqual(r, []interface{}{"exception"}, t)
+	AreEqual(ok, false, t)
 
 }
 
-func TestAny(t *testing.T) {
+//func TestAny(t *testing.T) {
 
-}
+//}
 
-func TestWhen(t *testing.T) {
+//func TestWhen(t *testing.T) {
 
-}
+//}

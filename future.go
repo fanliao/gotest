@@ -2,9 +2,7 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"sync"
-	"time"
 )
 
 type stringer interface {
@@ -77,6 +75,12 @@ func (this *Future) Reslove(v ...interface{}) (e error) {
 	r := &futureResult{v, true}
 	this.chIn <- r
 	e = nil
+	//a := new(sync.Once)
+	//a.Do(func() {
+	//	r := &futureResult{v, true}
+	//	this.chIn <- r
+	//	e = nil
+	//})
 	return
 }
 
@@ -112,6 +116,8 @@ func (this *Future) Always(callback func(v ...interface{})) *Future {
 	return this
 }
 
+//for then api, the new Future object will be return
+//New future task object should be started after current future be done or failed
 //链式添加异步任务，可以同时定制Done或Fail状态下的链式异步任务，并返回一个新的异步对象。如果对此对象执行Done，Fail，Always操作，则新的回调函数将会被添加到链式的异步对象中
 //如果调用的参数超过2个，那第2个以后的参数将会被忽略
 func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) *Future {
@@ -312,8 +318,9 @@ func Submit(action func() []interface{}) *Future {
 
 	go func() {
 		defer func() {
-			e := recover()
-			fu.Reject(e)
+			if e := recover(); e != nil {
+				fu.Reject(e)
+			}
 		}()
 
 		r := action()
@@ -392,33 +399,6 @@ func When(fs ...*Future) *Future {
 	}()
 
 	return f
-}
-
-func task() *Future {
-	c := func(v ...interface{}) {
-		fmt.Println("callback", v)
-	}
-	f := NewFuture().Done(c)
-
-	go func() {
-		time.Sleep(1 * time.Second)
-		f.Reslove(10)
-		fmt.Println("send done")
-	}()
-
-	fmt.Println("end start")
-	return f
-}
-func testFuture() {
-	f := task()
-
-	fmt.Println("begin receive")
-	time.Sleep(2 * time.Second)
-	r, ok := f.Get()
-	fmt.Println("receive", r, ok)
-	r, ok = f.Get()
-	fmt.Println("receive again", r, ok)
-
 }
 
 func forSlice(s []func(v ...interface{}), f func(func(v ...interface{}))) {

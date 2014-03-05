@@ -148,7 +148,6 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 		} else {
 			for i := 0; i < v1.Len(); i++ {
 				if !checkEquals(v1.Index(i).Interface(), v2.Index(i).Interface(), deep, visited) { // v1.Index(i).Interface() != v2.Index(i).Interface() {
-					fmt.Println("compare s", v1.Index(i).Interface(), v2.Index(i).Interface())
 					return false
 				}
 			}
