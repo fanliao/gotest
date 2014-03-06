@@ -54,7 +54,7 @@ var alwaysForFail func(v ...interface{}) = func(v ...interface{}) {
 func TestDoneAlways(t *testing.T) {
 	tObj = t
 	order = make([]string, 0, 10)
-	f := Submit(taskDone).Done(done).Always(alwaysForDone).Done(done)
+	f := Start(taskDone).Done(done).Always(alwaysForDone).Done(done)
 
 	r, ok := f.Get()
 	order = append(order, GET)
@@ -75,7 +75,7 @@ func TestDoneAlways(t *testing.T) {
 func TestFailAlways(t *testing.T) {
 	tObj = t
 	order = make([]string, 0, 10)
-	f := Submit(taskFail).Fail(fail).Always(alwaysForFail).Fail(fail)
+	f := Start(taskFail).Fail(fail).Always(alwaysForFail).Fail(fail)
 
 	r, ok := f.Get()
 	order = append(order, GET)
@@ -90,7 +90,7 @@ func TestFailAlways(t *testing.T) {
 func TestThenWhenDone(t *testing.T) {
 	tObj = t
 	taskDoneThen := func(v ...interface{}) *Future {
-		return Submit(func() []interface{} {
+		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, DONE_THEN_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
@@ -98,7 +98,7 @@ func TestThenWhenDone(t *testing.T) {
 	}
 
 	taskFailThen := func(v ...interface{}) *Future {
-		return Submit(func() []interface{} {
+		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, FAIL_THEN_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", false}
@@ -106,7 +106,7 @@ func TestThenWhenDone(t *testing.T) {
 	}
 
 	SubmitWithCallback := func(task func() []interface{}) *Future {
-		return Submit(task).Done(done).Fail(fail).
+		return Start(task).Done(done).Fail(fail).
 			Then(taskDoneThen, taskFailThen)
 	}
 
@@ -137,7 +137,7 @@ func TestThenWhenDone(t *testing.T) {
 func TestGetOrTimeout(t *testing.T) {
 	tObj = t
 	order = make([]string, 0, 10)
-	f := Submit(taskDone)
+	f := Start(taskDone)
 
 	//timeout
 	r, ok, timeout := f.GetOrTimeout(100)
@@ -167,7 +167,7 @@ func TestException(t *testing.T) {
 		return []interface{}{10, "ok", true}
 	}
 
-	f := Submit(task).Done(func(v ...interface{}) {
+	f := Start(task).Done(func(v ...interface{}) {
 		time.Sleep(200 * time.Millisecond)
 		order = append(order, "run Done callback,")
 	}).Always(func(v ...interface{}) {

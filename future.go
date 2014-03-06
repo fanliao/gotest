@@ -123,12 +123,13 @@ func (this *Future) Always(callback func(v ...interface{})) *Future {
 func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result *Future) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+	if len(callbacks) == 0 ||
+		(len(callbacks) == 1 && callbacks[0] == nil) ||
+		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
+		result = this
+		return
+	}
 	this.onceThen.Do(func() {
-		if len(callbacks) == 0 ||
-			(len(callbacks) == 1 && callbacks[0] == nil) ||
-			(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
-			result = this
-		}
 		if this.r != nil {
 			f := this
 
@@ -161,33 +162,7 @@ func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *F
 	}
 }
 
-////启动一个异步goroutine监控任务完成
-//func (this *Future) start() {
-//	r := <-this.chIn
-//	this.setResult(r)
-
-//	//让Get函数可以返回
-//	this.chOut <- r
-//	close(this.chOut)
-
-//	//任务完成后调用回调函数
-//	execCallback(r, this.dones, this.fails, this.always)
-
-//	//处理链式异步任务
-//	pipeTask, pipeFuture := this.getPipe(r.ok)
-//	if pipeTask != nil {
-//		go func() {
-//			target := pipeTask(r.result...)
-//			target.Done(func(v ...interface{}) {
-//				pipeFuture.Reslove(v...)
-//			}).Fail(func(v ...interface{}) {
-//				pipeFuture.Reject(v...)
-//			})
-//		}()
-//	}
-//}
-
-//启动一个异步goroutine监控任务完成
+//完成一个任务
 func (this *Future) end(r *futureResult) {
 	//r := <-this.chIn
 	this.setResult(r)
@@ -199,17 +174,7 @@ func (this *Future) end(r *futureResult) {
 	//任务完成后调用回调函数
 	execCallback(r, this.dones, this.fails, this.always)
 
-	//处理链式异步任务
-	pipeTask, pipeFuture := this.getPipe(r.ok)
-	if pipeTask != nil {
-		go func() {
-			pipeTask(r.result...).Done(func(v ...interface{}) {
-				pipeFuture.Reslove(v...)
-			}).Fail(func(v ...interface{}) {
-				pipeFuture.Reject(v...)
-			})
-		}()
-	}
+	this.startPipe()
 }
 
 //set this.r
@@ -219,12 +184,17 @@ func (this *Future) setResult(r *futureResult) {
 	this.r = r
 }
 
-//执行回调函数，利用lock保证访问this.r是线程安全的
-func (this *Future) execCallback(r *futureResult) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.r = r
-	execCallback(r, this.dones, this.fails, this.always)
+func (this *Future) startPipe() {
+	//处理链式异步任务
+	pipeTask, pipeFuture := this.getPipe(this.r.ok)
+	if pipeTask != nil {
+		pipeTask(this.r.result...).Done(func(v ...interface{}) {
+			pipeFuture.Reslove(v...)
+		}).Fail(func(v ...interface{}) {
+			pipeFuture.Reject(v...)
+		})
+	}
+
 }
 
 //执行回调函数
@@ -247,7 +217,7 @@ func execCallback(r *futureResult, dones []func(v ...interface{}), fails []func(
 
 }
 
-//处理单个回调函数的添加请求p
+//处理单个回调函数的添加请求
 func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbackType) {
 	if callback == nil {
 		return
@@ -292,7 +262,7 @@ func (this *Future) addCallback(pendingAction func(), finalAction func(*futureRe
 }
 
 //异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
-func Submit(action func() []interface{}) *Future {
+func Start(action func() []interface{}) *Future {
 	fu := NewFuture()
 
 	go func() {
@@ -319,8 +289,8 @@ func Submit(action func() []interface{}) *Future {
 	return fu
 }
 
-func Submit0(action func()) *Future {
-	return Submit(func() []interface{} {
+func Start0(action func()) *Future {
+	return Start(func() []interface{} {
 		action()
 		return make([]interface{}, 0, 0)
 	})
@@ -334,9 +304,6 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
 		pipe{}, nil}
-	//go func() {
-	//	f.start()
-	//}()
 	return f
 }
 
