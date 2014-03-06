@@ -134,6 +134,30 @@ func TestThenWhenDone(t *testing.T) {
 
 }
 
+func TestGetOrTimeout(t *testing.T) {
+	tObj = t
+	order = make([]string, 0, 10)
+	f := Submit(taskDone)
+
+	//timeout
+	r, ok, timeout := f.GetOrTimeout(100)
+	AreEqual(timeout, true, t)
+
+	order = append(order, GET)
+	//get return value
+	r, ok, timeout = f.GetOrTimeout(470)
+	AreEqual(timeout, false, t)
+	AreEqual(order, []string{GET, TASK_END}, t)
+	AreEqual(r, []interface{}{10, "ok"}, t)
+	AreEqual(ok, true, t)
+
+	//if task be done and timeout is 0, still can get return value
+	r, ok, timeout = f.GetOrTimeout(0)
+	AreEqual(timeout, false, t)
+	AreEqual(r, []interface{}{10, "ok"}, t)
+	AreEqual(ok, true, t)
+}
+
 func TestException(t *testing.T) {
 	order = make([]string, 0, 10)
 	task := func() []interface{} {
