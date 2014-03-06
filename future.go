@@ -120,9 +120,7 @@ func (this *Future) Always(callback func(v ...interface{})) *Future {
 //链式添加异步任务，可以同时定制Done或Fail状态下的链式异步任务，并返回一个新的异步对象。如果对此对象执行Done，Fail，Always操作，则新的回调函数将会被添加到链式的异步对象中
 //如果调用的参数超过2个，那第2个以后的参数将会被忽略
 //Then只能调用一次，第一次后的调用将被忽略
-func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result *Future) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
+func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result *Future, ok bool) {
 	if len(callbacks) == 0 ||
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
@@ -130,6 +128,8 @@ func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result 
 		return
 	}
 	this.onceThen.Do(func() {
+		this.lock.Lock()
+		defer this.lock.Unlock()
 		if this.r != nil {
 			f := this
 
@@ -147,6 +147,7 @@ func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result 
 			this.pipeFuture = NewFuture()
 			result = this.pipeFuture
 		}
+		ok = true
 	})
 	return
 }
@@ -199,13 +200,11 @@ func (this *Future) startPipe() {
 
 //执行回调函数
 func execCallback(r *futureResult, dones []func(v ...interface{}), fails []func(v ...interface{}), always []func(v ...interface{})) {
-
 	var callbacks []func(v ...interface{})
 	if r.ok {
 		callbacks = dones
 	} else {
 		callbacks = fails
-
 	}
 
 	forFs := func(s []func(v ...interface{})) {
@@ -239,8 +238,7 @@ func (this *Future) handleOneCallback(callback func(v ...interface{}), t callbac
 			callback(r.result...)
 		}
 	}
-	f := this.addCallback(pendingAction, finalAction)
-	if f != nil {
+	if f := this.addCallback(pendingAction, finalAction); f != nil {
 		f()
 	}
 }

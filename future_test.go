@@ -105,14 +105,14 @@ func TestThenWhenDone(t *testing.T) {
 		})
 	}
 
-	SubmitWithCallback := func(task func() []interface{}) *Future {
+	SubmitWithCallback := func(task func() []interface{}) (*Future, bool) {
 		return Start(task).Done(done).Fail(fail).
 			Then(taskDoneThen, taskFailThen)
 	}
 
 	//test Done branch for Then function
 	order = make([]string, 0, 10)
-	f := SubmitWithCallback(taskDone)
+	f, isOk := SubmitWithCallback(taskDone)
 	r, ok := f.Get()
 	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
@@ -120,10 +120,11 @@ func TestThenWhenDone(t *testing.T) {
 	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_THEN_END, GET}, t)
 	AreEqual(r, []interface{}{20, "ok2"}, t)
 	AreEqual(ok, true, t)
+	AreEqual(isOk, true, t)
 
 	//test fail branch for Then function
 	order = make([]string, 0, 10)
-	f = SubmitWithCallback(taskFail)
+	f, isOk = SubmitWithCallback(taskFail)
 	r, ok = f.Get()
 	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
@@ -131,7 +132,10 @@ func TestThenWhenDone(t *testing.T) {
 	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_THEN_END, GET}, t)
 	AreEqual(r, []interface{}{20, "fail2"}, t)
 	AreEqual(ok, false, t)
+	AreEqual(isOk, true, t)
 
+	f, isOk = f.Then(taskDoneThen, taskFailThen)
+	AreEqual(isOk, false, t)
 }
 
 func TestGetOrTimeout(t *testing.T) {
