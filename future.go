@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"fmt"
+	//"fmt"
 	"sync"
 	"time"
 )
@@ -43,7 +43,13 @@ type Future struct {
 	chOut                chan *futureResult
 	dones, fails, always []func(v ...interface{})
 	pipe
-	r *futureResult
+	r          *futureResult
+	isPromised bool
+}
+
+func (this *Future) Promise() *Future {
+	this.isPromised = true
+	return this
 }
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
@@ -72,32 +78,6 @@ func (this *Future) GetOrTimeout(mm int) ([]interface{}, bool, bool) {
 		}
 
 	}
-}
-
-//Reslove表示任务正常完成
-func (this *Future) Reslove(v ...interface{}) (e error) {
-	defer func() {
-		e = getError(recover())
-	}()
-	this.onceEnd.Do(func() {
-		r := &futureResult{v, true}
-		//this.chIn <- r
-		this.end(r)
-	})
-	return
-}
-
-//Reject表示任务失败
-func (this *Future) Reject(v ...interface{}) (e error) {
-	defer func() {
-		e = getError(recover())
-	}()
-	this.onceEnd.Do(func() {
-		r := &futureResult{v, false}
-		//this.chIn <- r
-		this.end(r)
-	})
-	return
 }
 
 //添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
@@ -159,6 +139,42 @@ func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result 
 	return
 }
 
+//Reslove表示任务正常完成
+func (this *Future) Reslove(v ...interface{}) (e error) {
+	return this.end(&futureResult{v, true})
+}
+
+//Reject表示任务失败
+func (this *Future) Reject(v ...interface{}) (e error) {
+	return this.end(&futureResult{v, false})
+}
+
+//完成一个任务
+func (this *Future) end(r *futureResult) (e error) { //r *futureResult) {
+	defer func() {
+		e = getError(recover())
+	}()
+	if this.isPromised {
+		e = errors.New("The future is promised")
+	}
+	e = errors.New("Cannoy resolve/reject more than once")
+	this.onceEnd.Do(func() {
+		//r := <-this.chIn
+		this.setResult(r)
+
+		//让Get函数可以返回
+		this.chOut <- r
+		close(this.chOut)
+
+		//任务完成后调用回调函数
+		execCallback(r, this.dones, this.fails, this.always)
+
+		this.startPipe()
+		e = nil
+	})
+	return
+}
+
 //返回与链式调用相关的对象
 func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *Future) {
 	this.lock.Lock()
@@ -168,21 +184,6 @@ func (this *Future) getPipe(isResolved bool) (func(v ...interface{}) *Future, *F
 	} else {
 		return this.pipeFailTask, this.pipeFuture
 	}
-}
-
-//完成一个任务
-func (this *Future) end(r *futureResult) {
-	//r := <-this.chIn
-	this.setResult(r)
-
-	//让Get函数可以返回
-	this.chOut <- r
-	close(this.chOut)
-
-	//任务完成后调用回调函数
-	execCallback(r, this.dones, this.fails, this.always)
-
-	this.startPipe()
 }
 
 //set this.r
@@ -278,6 +279,7 @@ func Start(action func() []interface{}) *Future {
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
+
 				fu.Reject(e)
 			}
 		}()
@@ -292,11 +294,12 @@ func Start(action func() []interface{}) *Future {
 				}
 
 			}
+		} else {
+			fu.Reslove(r...)
 		}
-		fu.Reslove(r...)
 	}()
 
-	return fu
+	return fu //.Promise()
 }
 
 func Start0(action func()) *Future {
@@ -319,7 +322,8 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
-		pipe{}, nil}
+		pipe{}, nil, false,
+	}
 	return f
 }
 
@@ -355,7 +359,7 @@ func Any(fs ...*Future) *Future {
 					break
 				}
 			}
-			fmt.Println("exit any loop")
+			//fmt.Println("exit any loop")
 		}()
 	}
 	return nf
