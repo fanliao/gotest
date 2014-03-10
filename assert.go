@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"unsafe"
 )
 
@@ -20,12 +21,13 @@ type tester interface {
 
 func AreEqual(actual interface{}, expect interface{}, t tester) bool {
 	if !equals(actual, expect) {
+		_, file, line, _ := runtime.Caller(1)
 		if t != nil {
 			//fmt.Println("t=", t)
-			t.Log("Failed! expect", expect, ", actual", actual)
+			t.Log("Failed! expect", expect, ", actual", actual, "in", file, "lines", line)
 			t.Fail()
 		} else {
-			fmt.Println("Failed! expect", expect, ", actual", actual)
+			fmt.Println("Failed! expect", expect, ", actual", actual, "in", file, "lines", line)
 		}
 		return false
 	} else {
@@ -55,6 +57,8 @@ func isNil(a interface{}) (r bool) {
 			r = false
 		}
 	}()
+	//fmt.Println("ValueOf is", reflect.ValueOf(a), "Kind is", reflect.ValueOf(a).Kind())
+	//fmt.Println("word is", *(*unsafe.Pointer)(unsafe.Pointer(faceToStruct(a).word)))
 	if a == nil {
 		//fmt.Println("is nil")
 		r = true
@@ -91,11 +95,12 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 
 	aIsNil, bIsNil := isNil(a), isNil(b)
 	if aIsNil || bIsNil {
+		//fmt.Printf("isnil is %v %v\n", aIsNil, bIsNil)
 		return aIsNil == bIsNil
 	}
 
 	if v1.Type() != v2.Type() {
-		fmt.Println("type isnot same", a, b, v1.Type(), v2.Type())
+		//fmt.Println("type isnot same", a, b, v1.Type(), v2.Type())
 		return false
 	}
 

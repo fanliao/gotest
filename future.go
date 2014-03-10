@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -16,6 +17,11 @@ type callbackType int
 
 type stringer interface {
 	String() string
+}
+
+type anyFutureResult struct {
+	result []interface{}
+	i      int
 }
 
 //代表异步任务的结果
@@ -127,6 +133,7 @@ func (this *Future) Then(callbacks ...(func(v ...interface{}) *Future)) (result 
 		result = this
 		return
 	}
+
 	this.onceThen.Do(func() {
 		this.lock.Lock()
 		defer this.lock.Unlock()
@@ -188,13 +195,18 @@ func (this *Future) setResult(r *futureResult) {
 func (this *Future) startPipe() {
 	//处理链式异步任务
 	pipeTask, pipeFuture := this.getPipe(this.r.ok)
+	var f *Future
 	if pipeTask != nil {
-		pipeTask(this.r.result...).Done(func(v ...interface{}) {
-			pipeFuture.Reslove(v...)
-		}).Fail(func(v ...interface{}) {
-			pipeFuture.Reject(v...)
-		})
+		f = pipeTask(this.r.result...)
+	} else {
+		f = this
 	}
+
+	f.Done(func(v ...interface{}) {
+		pipeFuture.Reslove(v...)
+	}).Fail(func(v ...interface{}) {
+		pipeFuture.Reject(v...)
+	})
 
 }
 
@@ -294,6 +306,12 @@ func Start0(action func()) *Future {
 	})
 }
 
+func Wrap(value interface{}) *Future {
+	fu := NewFuture()
+	fu.Reslove(value)
+	return fu
+}
+
 //Factory function for future
 func NewFuture() *Future {
 	f := &Future{new(sync.Once), new(sync.Once), new(sync.Mutex),
@@ -305,41 +323,68 @@ func NewFuture() *Future {
 	return f
 }
 
-//产生一个新的Future，如果列表中任意1个Future完成，则Future完成
+//产生一个新的Future，如果列表中任意1个Future完成，则Future完成, 否则将触发Reject，参数为包含所有Future的Reject返回值的slice
 func Any(fs ...*Future) *Future {
 	nf := NewFuture()
+	errors := make([]interface{}, len(fs), len(fs))
+	chFails := make(chan anyFutureResult)
 
-	for _, f := range fs {
+	for i, f := range fs {
+		k := i
 		f.Done(func(v ...interface{}) {
 			nf.Reslove(v...)
 		}).Fail(func(v ...interface{}) {
-			nf.Reject(v...)
+			chFails <- anyFutureResult{v, k}
 		})
 	}
 
+	if len(fs) == 0 {
+		nf.Reslove()
+	} else {
+		go func() {
+			j := 0
+			for {
+				select {
+				case r := <-chFails:
+					errors[r.i] = r.result
+					if j++; j == len(fs) {
+						nf.Reject(errors...)
+						break
+					}
+				case _ = <-nf.chOut:
+					break
+				}
+			}
+			fmt.Println("exit any loop")
+		}()
+	}
 	return nf
 }
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Future成功完成，否则失败
 func When(fs ...*Future) *Future {
 	f := NewFuture()
-	go func() {
-		rs := make([][]interface{}, len(fs))
-		allOk := true
-		for _, f := range fs {
-			r, ok := f.Get()
-			r = append(r, ok)
-			rs = append(rs, r)
-			if !ok {
-				allOk = false
+	if len(fs) == 0 {
+		f.Reslove()
+	} else {
+		go func() {
+			rs := make([]interface{}, len(fs))
+			allOk := true
+			for i, f := range fs {
+				r, ok := f.Get()
+				r = append(r, ok)
+				rs[i] = r
+				if !ok {
+					allOk = false
+				}
 			}
-		}
-		if allOk {
-			f.Reslove(rs)
-		} else {
-			f.Reject(rs)
-		}
-	}()
+			if allOk {
+				f.Reslove(rs...)
+			} else {
+				f.Reject(rs...)
+			}
+		}()
+	}
 
 	return f
 }

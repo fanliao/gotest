@@ -1,6 +1,7 @@
 package main
 
 import (
+	//"fmt"
 	"testing"
 	"time"
 )
@@ -22,13 +23,11 @@ var tObj *testing.T
 var taskDone func() []interface{} = func() []interface{} {
 	time.Sleep(500 * time.Millisecond)
 	order = append(order, TASK_END)
-	tObj.Log("call task done")
 	return []interface{}{10, "ok", true}
 }
 var taskFail func() []interface{} = func() []interface{} {
 	time.Sleep(500 * time.Millisecond)
 	order = append(order, TASK_END)
-	tObj.Log("call task fail")
 	return []interface{}{10, "fail", false}
 }
 
@@ -135,19 +134,24 @@ func TestThenWhenDone(t *testing.T) {
 	AreEqual(isOk, true, t)
 
 	f, isOk = f.Then(taskDoneThen, taskFailThen)
-	AreEqual(isOk, false, t)
+	t.Log("isok?", isOk, f, f.onceThen)
+	AreEqual(isOk, true, t)
+	_, _ = f.Get()
 }
 
 func TestGetOrTimeout(t *testing.T) {
 	tObj = t
 	order = make([]string, 0, 10)
+	AreEqual(order, []string{}, t)
 	f := Start(taskDone)
 
+	AreEqual(order, []string{}, t)
 	//timeout
 	r, ok, timeout := f.GetOrTimeout(100)
 	AreEqual(timeout, true, t)
 
 	order = append(order, GET)
+	AreEqual(order, []string{GET}, t)
 	//get return value
 	r, ok, timeout = f.GetOrTimeout(470)
 	AreEqual(timeout, false, t)
@@ -190,10 +194,105 @@ func TestException(t *testing.T) {
 
 }
 
-//func TestAny(t *testing.T) {
+func TestAny(t *testing.T) {
+	startTwoTask := func(t1 int, t2 int) *Future {
+		timeout1 := time.Duration(t1)
+		timeout2 := time.Duration(t2)
+		task1 := func() (r []interface{}) {
+			if timeout1 > 0 {
+				time.Sleep(timeout1 * time.Millisecond)
+				r = []interface{}{10, "ok", true}
+			} else {
+				time.Sleep((-1 * timeout1) * time.Millisecond)
+				r = []interface{}{-10, "fail", false}
+			}
+			return
+		}
+		task2 := func() (r []interface{}) {
+			if timeout2 > 0 {
+				time.Sleep(timeout2 * time.Millisecond)
+				r = []interface{}{20, "ok2", true}
+			} else {
+				time.Sleep((-1 * timeout2) * time.Millisecond)
+				r = []interface{}{-20, "fail2", false}
+			}
+			return
+		}
+		f := Any(Start(task1), Start(task2))
+		return f
+	}
 
-//}
+	r, ok := startTwoTask(200, 250).Get()
+	AreEqual(r, []interface{}{10, "ok"}, t)
+	AreEqual(ok, true, t)
 
-//func TestWhen(t *testing.T) {
+	r, ok = startTwoTask(280, 250).Get()
+	AreEqual(r, []interface{}{20, "ok2"}, t)
+	AreEqual(ok, true, t)
 
-//}
+	r, ok = startTwoTask(-280, -250).Get()
+	AreEqual(r, []interface{}{[]interface{}{-10, "fail"}, []interface{}{-20, "fail2"}}, t)
+	AreEqual(ok, false, t)
+
+	r, ok = startTwoTask(-280, 150).Get()
+	AreEqual(r, []interface{}{20, "ok2"}, t)
+	AreEqual(ok, true, t)
+
+	r, ok = Any().Get()
+	AreEqual(r, *new([]interface{}), t)
+	AreEqual(ok, true, t)
+}
+
+func TestWhen(t *testing.T) {
+	startTwoTask := func(t1 int, t2 int) *Future {
+		timeout1 := time.Duration(t1)
+		timeout2 := time.Duration(t2)
+		task1 := func() (r []interface{}) {
+			if timeout1 > 0 {
+				time.Sleep(timeout1 * time.Millisecond)
+				r = []interface{}{10, "ok", true}
+			} else {
+				time.Sleep((-1 * timeout1) * time.Millisecond)
+				r = []interface{}{-10, "fail", false}
+			}
+			return
+		}
+		task2 := func() (r []interface{}) {
+			if timeout2 > 0 {
+				time.Sleep(timeout2 * time.Millisecond)
+				r = []interface{}{20, "ok2", true}
+			} else {
+				time.Sleep((-1 * timeout2) * time.Millisecond)
+				r = []interface{}{-20, "fail2", false}
+			}
+			return
+		}
+		f := When(Start(task1), Start(task2))
+		return f
+	}
+	r, ok := startTwoTask(200, 250).Get()
+	AreEqual(r, []interface{}{[]interface{}{10, "ok", true}, []interface{}{20, "ok2", true}}, t)
+	AreEqual(ok, true, t)
+
+	r, ok = startTwoTask(250, 210).Get()
+	AreEqual(r, []interface{}{[]interface{}{10, "ok", true}, []interface{}{20, "ok2", true}}, t)
+	AreEqual(ok, true, t)
+
+	r, ok = startTwoTask(-250, 210).Get()
+	AreEqual(r, []interface{}{[]interface{}{-10, "fail", false}, []interface{}{20, "ok2", true}}, t)
+	AreEqual(ok, false, t)
+
+	r, ok = startTwoTask(-250, -210).Get()
+	AreEqual(r, []interface{}{[]interface{}{-10, "fail", false}, []interface{}{-20, "fail2", false}}, t)
+	AreEqual(ok, false, t)
+
+	r, ok = When().Get()
+	AreEqual(r, *new([]interface{}), t)
+	AreEqual(ok, true, t)
+}
+
+func TestWrap(t *testing.T) {
+	r, ok := Wrap(10).Get()
+	AreEqual(r, []interface{}{10}, t)
+	AreEqual(ok, true, t)
+}
