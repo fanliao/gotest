@@ -93,7 +93,7 @@ func TestThenWhenDone(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, DONE_THEN_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
-		}).Promise()
+		})
 	}
 
 	taskFailThen := func(v ...interface{}) *PromiseValue {
@@ -101,7 +101,7 @@ func TestThenWhenDone(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, FAIL_THEN_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", false}
-		}).Promise()
+		})
 	}
 
 	SubmitWithCallback := func(task func() []interface{}) (*PromiseValue, bool) {
@@ -195,7 +195,7 @@ func TestException(t *testing.T) {
 }
 
 func TestAny(t *testing.T) {
-	startTwoTask := func(t1 int, t2 int) *Future {
+	startTwoTask := func(t1 int, t2 int) *PromiseValue {
 		timeout1 := time.Duration(t1)
 		timeout2 := time.Duration(t2)
 		task1 := func() (r []interface{}) {
@@ -244,7 +244,7 @@ func TestAny(t *testing.T) {
 }
 
 func TestWhen(t *testing.T) {
-	startTwoTask := func(t1 int, t2 int) *Future {
+	startTwoTask := func(t1 int, t2 int) *PromiseValue {
 		timeout1 := time.Duration(t1)
 		timeout2 := time.Duration(t2)
 		task1 := func() (r []interface{}) {
@@ -295,16 +295,4 @@ func TestWrap(t *testing.T) {
 	r, ok := Wrap(10).Get()
 	AreEqual(r, []interface{}{10}, t)
 	AreEqual(ok, true, t)
-}
-
-func TestPromise(t *testing.T) {
-	task := func() []interface{} {
-		time.Sleep(500 * time.Millisecond)
-		return []interface{}{10, "ok", true}
-	}
-	f := Start(task).Promise()
-
-	t.Log(f.Get())
-	//AreEqual(e, "Cannoy resolve/reject more than once", t)
-
 }

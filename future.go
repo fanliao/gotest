@@ -45,7 +45,6 @@ type Future struct {
 	//dones, fails, always []func(v ...interface{})
 	//pipe
 	//r          *futureResult
-	isPromised bool
 }
 
 func (this *Future) Promise() *PromiseValue {
@@ -186,9 +185,6 @@ func (this *Future) end(r *futureResult) (e error) { //r *futureResult) {
 	defer func() {
 		e = getError(recover())
 	}()
-	if this.isPromised {
-		e = errors.New("The future is promised")
-	}
 	e = errors.New("Cannoy resolve/reject more than once")
 	this.onceEnd.Do(func() {
 		//r := <-this.chIn
@@ -305,7 +301,7 @@ func (this *PromiseValue) addCallback(pendingAction func(), finalAction func(*fu
 }
 
 //异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
-func Start(action func() []interface{}) *Future {
+func Start(action func() []interface{}) *PromiseValue {
 	fu := NewFuture()
 
 	go func() {
@@ -331,20 +327,20 @@ func Start(action func() []interface{}) *Future {
 		}
 	}()
 
-	return fu //.Promise()
+	return fu.Promise()
 }
 
-func Start0(action func()) *Future {
+func Start0(action func()) *PromiseValue {
 	return Start(func() []interface{} {
 		action()
 		return make([]interface{}, 0, 0)
 	})
 }
 
-func Wrap(value interface{}) *Future {
+func Wrap(value interface{}) *PromiseValue {
 	fu := NewFuture()
 	fu.Reslove(value)
-	return fu
+	return fu.Promise()
 }
 
 //Factory function for future
@@ -354,13 +350,13 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
-		pipe{}, nil}, false,
+		pipe{}, nil},
 	}
 	return f
 }
 
 //产生一个新的Future，如果列表中任意1个Future完成，则Future完成, 否则将触发Reject，参数为包含所有Future的Reject返回值的slice
-func Any(fs ...*Future) *Future {
+func Any(fs ...*PromiseValue) *PromiseValue {
 	nf := NewFuture()
 	errors := make([]interface{}, len(fs), len(fs))
 	chFails := make(chan anyFutureResult)
@@ -394,11 +390,11 @@ func Any(fs ...*Future) *Future {
 			//fmt.Println("exit any loop")
 		}()
 	}
-	return nf
+	return nf.Promise()
 }
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Future成功完成，否则失败
-func When(fs ...*Future) *Future {
+func When(fs ...*PromiseValue) *PromiseValue {
 	f := NewFuture()
 	if len(fs) == 0 {
 		f.Reslove()
@@ -422,7 +418,7 @@ func When(fs ...*Future) *Future {
 		}()
 	}
 
-	return f
+	return f.Promise()
 }
 
 func forSlice(s []func(v ...interface{}), f func(func(v ...interface{}))) {
