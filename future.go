@@ -91,7 +91,43 @@ type PromiseValue struct {
 	dones, fails, always []func(v ...interface{})
 	pipe
 	r *futureResult
+	Canceller *PromiseCanceller
 }
+
+type PromiseCanceller struct {
+	lock  *sync.Mutex
+	hasAskCancel bool
+	isCancelled bool
+}
+
+//Cancel任务
+func (this *PromiseCanceller) Cancel() bool {
+	lock this.lock
+	defer unlock this.lock
+	this.hasAskCancel = true
+}
+
+//已经被要求取消任务
+func (this *PromiseCanceller) HasAskCancel() bool {
+	lock this.lock
+	defer unlock this.lock
+	return this.hasAskCancel
+}
+
+//设置任务已经被Cancel
+func (this *PromiseCanceller) SetIsCancelled() bool {
+	lock this.lock
+	defer unlock this.lock
+	this.isCancelled = true
+}
+
+//任务已经被Cancel
+func (this *PromiseCanceller) IsCancelled() bool {
+	lock this.lock
+	defer unlock this.lock
+	return this.isCancelled
+}
+
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
@@ -300,10 +336,29 @@ func (this *PromiseValue) addCallback(pendingAction func(), finalAction func(*fu
 	}
 }
 
-//异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
-func Start(action func() []interface{}) *PromiseValue {
-	fu := NewFuture()
+func StartCanCancel(action func(canceller *PromiseCanceller) []interface{}) *PromiseValue{
+}
 
+func Start0(action func()) *PromiseValue {
+	return Start(func() []interface{} {
+		action()
+		return make([]interface{}, 0, 0)
+	})
+}
+
+//异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
+func start(action interface, bool canCancel) *PromiseValue {
+	fu := NewFuture()
+	
+	var action1 func() []interface{}
+	var action2 func(canceller *PromiseCanceller) []interface{}
+	if canCancel {
+		action2 = action.(func(canceller *PromiseCanceller) []interface{})
+		fu.Canceller = &PromiseCanceller{new(sync.Mutex), false, false}
+	} else {
+		action1 = action.(func() []interface{})
+	}
+	
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
@@ -312,7 +367,11 @@ func Start(action func() []interface{}) *PromiseValue {
 			}
 		}()
 
-		r := action()
+		if canCancel {
+			r := action2(fu.Canceller)
+		} else {
+			r := action1()
+		}
 		if l := len(r); l > 0 {
 			if done, ok := r[l-1].(bool); ok {
 				if done {
@@ -330,13 +389,6 @@ func Start(action func() []interface{}) *PromiseValue {
 	return fu.Promise()
 }
 
-func Start0(action func()) *PromiseValue {
-	return Start(func() []interface{} {
-		action()
-		return make([]interface{}, 0, 0)
-	})
-}
-
 func Wrap(value interface{}) *PromiseValue {
 	fu := NewFuture()
 	fu.Reslove(value)
@@ -350,7 +402,7 @@ func NewFuture() *Future {
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 8),
 		make([]func(v ...interface{}), 0, 4),
-		pipe{}, nil},
+		pipe{}, nil, nil},
 	}
 	return f
 }
