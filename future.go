@@ -83,6 +83,11 @@ func (this *Future) Reject(v ...interface{}) (e error) {
 	return this.end(&futureResult{v, false})
 }
 
+func (this *Future) EnableCanceller() *Future {
+	this.canceller = &canceller{new(sync.Mutex), false, false}
+	return this
+}
+
 //Promise代表一个异步任务
 type PromiseValue struct {
 	onceThen             *sync.Once
@@ -90,44 +95,89 @@ type PromiseValue struct {
 	chOut                chan *futureResult
 	dones, fails, always []func(v ...interface{})
 	pipe
-	r *futureResult
-	Canceller *PromiseCanceller
+	r          *futureResult
+	*canceller //*PromiseCanceller
 }
 
-type PromiseCanceller struct {
-	lock  *sync.Mutex
+type Canceller interface {
+	Cancel() bool
+	HasAskCancel() bool
+	SetIsCancelled()
+	IsCancelled() bool
+}
+
+type canceller struct {
+	lock         *sync.Mutex
 	hasAskCancel bool
-	isCancelled bool
+	isCancelled  bool
 }
 
 //Cancel任务
-func (this *PromiseCanceller) Cancel() bool {
-	lock this.lock
-	defer unlock this.lock
+func (this *canceller) Cancel() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
 	this.hasAskCancel = true
+	return true
 }
 
 //已经被要求取消任务
-func (this *PromiseCanceller) HasAskCancel() bool {
-	lock this.lock
-	defer unlock this.lock
+func (this *canceller) HasAskCancel() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
 	return this.hasAskCancel
 }
 
 //设置任务已经被Cancel
-func (this *PromiseCanceller) SetIsCancelled() bool {
-	lock this.lock
-	defer unlock this.lock
+func (this *canceller) SetIsCancelled() {
+	this.lock.Lock()
+	defer this.lock.Unlock()
 	this.isCancelled = true
 }
 
 //任务已经被Cancel
-func (this *PromiseCanceller) IsCancelled() bool {
-	lock this.lock
-	defer unlock this.lock
+func (this *canceller) IsCancelled() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
 	return this.isCancelled
 }
 
+func (this *PromiseValue) Canceller() Canceller {
+	return this.canceller
+}
+
+//Cancel任务
+func (this *PromiseValue) Cancel() bool {
+	if this.canceller != nil {
+		return this.canceller.Cancel()
+	} else {
+		return false
+	}
+}
+
+//已经被要求取消任务
+func (this *PromiseValue) HasAskCancel() bool {
+	if this.canceller != nil {
+		return this.canceller.HasAskCancel()
+	} else {
+		return false
+	}
+}
+
+//设置任务已经被Cancel
+func (this *PromiseValue) SetIsCancelled() {
+	if this.canceller != nil {
+		this.canceller.SetIsCancelled()
+	}
+}
+
+//任务已经被Cancel
+func (this *PromiseValue) IsCancelled() bool {
+	if this.canceller != nil {
+		return this.canceller.IsCancelled()
+	} else {
+		return false
+	}
+}
 
 //Get函数将一直阻塞直到任务完成,并返回任务的结果
 //如果任务已经完成，后续的Get将直接返回任务结果
@@ -336,29 +386,34 @@ func (this *PromiseValue) addCallback(pendingAction func(), finalAction func(*fu
 	}
 }
 
-func StartCanCancel(action func(canceller *PromiseCanceller) []interface{}) *PromiseValue{
+func StartCanCancel(action func(canceller Canceller) []interface{}) *PromiseValue {
+	return start(action, true)
+}
+
+func Start(action func() []interface{}) *PromiseValue {
+	return start(action, false)
 }
 
 func Start0(action func()) *PromiseValue {
-	return Start(func() []interface{} {
+	return start(func() []interface{} {
 		action()
 		return make([]interface{}, 0, 0)
-	})
+	}, false)
 }
 
 //异步执行一个函数。如果最后一个返回值为bool，则将认为此值代表异步任务成功或失败。如果函数抛出error，则认为异步任务失败
-func start(action interface, bool canCancel) *PromiseValue {
+func start(action interface{}, canCancel bool) *PromiseValue {
 	fu := NewFuture()
-	
+
 	var action1 func() []interface{}
-	var action2 func(canceller *PromiseCanceller) []interface{}
+	var action2 func(canceller Canceller) []interface{}
 	if canCancel {
-		action2 = action.(func(canceller *PromiseCanceller) []interface{})
-		fu.Canceller = &PromiseCanceller{new(sync.Mutex), false, false}
+		action2 = action.(func(canceller Canceller) []interface{})
+		fu.EnableCanceller()
 	} else {
 		action1 = action.(func() []interface{})
 	}
-	
+
 	go func() {
 		defer func() {
 			if e := recover(); e != nil {
@@ -367,10 +422,11 @@ func start(action interface, bool canCancel) *PromiseValue {
 			}
 		}()
 
+		var r []interface{}
 		if canCancel {
-			r := action2(fu.Canceller)
+			r = action2(fu.Canceller())
 		} else {
-			r := action1()
+			r = action1()
 		}
 		if l := len(r); l > 0 {
 			if done, ok := r[l-1].(bool); ok {

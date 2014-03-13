@@ -296,3 +296,26 @@ func TestWrap(t *testing.T) {
 	AreEqual(r, []interface{}{10}, t)
 	AreEqual(ok, true, t)
 }
+
+func TestCancel(t *testing.T) {
+	order = make([]string, 0, 10)
+	i := 0
+	task := func(canceller Canceller) []interface{} {
+		order = append(order, "task be end,")
+		for i < 50 {
+			if canceller.HasAskCancel() {
+				canceller.SetIsCancelled()
+				return nil
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		panic("exception")
+	}
+
+	f := StartCanCancel(task)
+	f.Cancel()
+	r, ok := f.Get()
+	AreEqual(r, nil, t)
+	AreEqual(ok, true, t)
+	AreEqual(f.Canceller().IsCancelled(), true, t)
+}
