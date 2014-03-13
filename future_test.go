@@ -13,8 +13,8 @@ const (
 	CALL_ALWAYS   = "callback always,"
 	WAIT_TASK     = "wait task end,"
 	GET           = "get task result,"
-	DONE_THEN_END = "task then done be end,"
-	FAIL_THEN_END = "task then fail be end,"
+	DONE_Pipe_END = "task Pipe done be end,"
+	FAIL_Pipe_END = "task Pipe fail be end,"
 )
 
 var order []string
@@ -86,55 +86,55 @@ func TestFailAlways(t *testing.T) {
 
 }
 
-func TestThenWhenDone(t *testing.T) {
+func TestPipeWhenDone(t *testing.T) {
 	tObj = t
-	taskDoneThen := func(v ...interface{}) *PromiseValue {
+	taskDonePipe := func(v ...interface{}) *PromiseValue {
 		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
-			order = append(order, DONE_THEN_END)
+			order = append(order, DONE_Pipe_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", true}
 		})
 	}
 
-	taskFailThen := func(v ...interface{}) *PromiseValue {
+	taskFailPipe := func(v ...interface{}) *PromiseValue {
 		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
-			order = append(order, FAIL_THEN_END)
+			order = append(order, FAIL_Pipe_END)
 			return []interface{}{v[0].(int) * 2, v[1].(string) + "2", false}
 		})
 	}
 
 	SubmitWithCallback := func(task func() []interface{}) (*PromiseValue, bool) {
 		return Start(task).Done(done).Fail(fail).
-			Then(taskDoneThen, taskFailThen)
+			Pipe(taskDonePipe, taskFailPipe)
 	}
 
-	//test Done branch for Then function
+	//test Done branch for Pipe function
 	order = make([]string, 0, 10)
 	f, isOk := SubmitWithCallback(taskDone)
 	r, ok := f.Get()
 	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
 
-	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_THEN_END, GET}, t)
+	AreEqual(order, []string{TASK_END, CALL_DONE, DONE_Pipe_END, GET}, t)
 	AreEqual(r, []interface{}{20, "ok2"}, t)
 	AreEqual(ok, true, t)
 	AreEqual(isOk, true, t)
 
-	//test fail branch for Then function
+	//test fail branch for Pipe function
 	order = make([]string, 0, 10)
 	f, isOk = SubmitWithCallback(taskFail)
 	r, ok = f.Get()
 	order = append(order, GET)
 	time.Sleep(300 * time.Millisecond)
 
-	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_THEN_END, GET}, t)
+	AreEqual(order, []string{TASK_END, CALL_FAIL, FAIL_Pipe_END, GET}, t)
 	AreEqual(r, []interface{}{20, "fail2"}, t)
 	AreEqual(ok, false, t)
 	AreEqual(isOk, true, t)
 
-	f, isOk = f.Then(taskDoneThen, taskFailThen)
-	t.Log("isok?", isOk, f, f.onceThen)
+	f, isOk = f.Pipe(taskDonePipe, taskFailPipe)
+	t.Log("isok?", isOk, f, f.oncePipe)
 	AreEqual(isOk, true, t)
 	_, _ = f.Get()
 }
@@ -147,13 +147,13 @@ func TestGetOrTimeout(t *testing.T) {
 
 	AreEqual(order, []string{}, t)
 	//timeout
-	r, ok, timeout := f.GetOrTimeout(100)
+	r, ok, timeout := f.GetOrTimeout(100 * 1000)
 	AreEqual(timeout, true, t)
 
 	order = append(order, GET)
 	AreEqual(order, []string{GET}, t)
 	//get return value
-	r, ok, timeout = f.GetOrTimeout(470)
+	r, ok, timeout = f.GetOrTimeout(470 * 1000)
 	AreEqual(timeout, false, t)
 	AreEqual(order, []string{GET, TASK_END}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
@@ -218,7 +218,7 @@ func TestAny(t *testing.T) {
 			}
 			return
 		}
-		f := Any(Start(task1), Start(task2))
+		f := WhenAny(Start(task1), Start(task2))
 		return f
 	}
 
@@ -238,7 +238,7 @@ func TestAny(t *testing.T) {
 	AreEqual(r, []interface{}{20, "ok2"}, t)
 	AreEqual(ok, true, t)
 
-	r, ok = Any().Get()
+	r, ok = WhenAny().Get()
 	AreEqual(r, *new([]interface{}), t)
 	AreEqual(ok, true, t)
 }
@@ -267,7 +267,7 @@ func TestWhen(t *testing.T) {
 			}
 			return
 		}
-		f := When(Start(task1), Start(task2))
+		f := WhenAll(Start(task1), Start(task2))
 		return f
 	}
 	r, ok := startTwoTask(200, 250).Get()
@@ -286,7 +286,7 @@ func TestWhen(t *testing.T) {
 	AreEqual(r, []interface{}{[]interface{}{-10, "fail", false}, []interface{}{-20, "fail2", false}}, t)
 	AreEqual(ok, false, t)
 
-	r, ok = When().Get()
+	r, ok = WhenAll().Get()
 	AreEqual(r, *new([]interface{}), t)
 	AreEqual(ok, true, t)
 }
@@ -303,7 +303,7 @@ func TestCancel(t *testing.T) {
 	task := func(canceller Canceller) []interface{} {
 		order = append(order, "task be end,")
 		for i < 50 {
-			if canceller.HasAskCancel() {
+			if canceller.IsCancellationRequested() {
 				canceller.SetIsCancelled()
 				return nil
 			}
@@ -317,5 +317,5 @@ func TestCancel(t *testing.T) {
 	r, ok := f.Get()
 	AreEqual(r, nil, t)
 	AreEqual(ok, true, t)
-	AreEqual(f.Canceller().IsCancelled(), true, t)
+	AreEqual(f.IsCancelled(), true, t)
 }

@@ -7,22 +7,13 @@ import (
 	"time"
 )
 
+type callbackType int
+
 const (
 	CALLBACK_DONE callbackType = iota
 	CALLBACK_FAIL
 	CALLBACK_ALWAYS
 )
-
-type callbackType int
-
-type stringer interface {
-	String() string
-}
-
-type anyFutureResult struct {
-	result []interface{}
-	i      int
-}
 
 //代表异步任务的结果
 type futureResult struct {
@@ -30,47 +21,21 @@ type futureResult struct {
 	ok     bool
 }
 
+//处理链式调用
 type pipe struct {
 	pipeDoneTask, pipeFailTask func(v ...interface{}) *PromiseValue
 	pipeFuture                 *Future
 }
 
-//Future代表一个异步任务
+//异步任务
 type Future struct {
 	onceEnd *sync.Once
 	*PromiseValue
-	//onceThen             *sync.Once
-	//lock                 *sync.Mutex
-	//chOut                chan *futureResult
-	//dones, fails, always []func(v ...interface{})
-	//pipe
-	//r          *futureResult
 }
 
+//获取一个代表了异步任务结果的对象
 func (this *Future) Promise() *PromiseValue {
 	return this.PromiseValue
-}
-
-//添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
-//传递给Done函数的参数与Reslove函数的参数相同
-func (this *Future) Done(callback func(v ...interface{})) *Future {
-	this.PromiseValue.Done(callback) // .handleOneCallback(callback, CALLBACK_DONE)
-	return this
-}
-
-//添加一个任务失败时的回调，如果任务已经失败，则直接执行回调函数
-//传递给Fail函数的参数与Reject函数的参数相同
-func (this *Future) Fail(callback func(v ...interface{})) *Future {
-	this.PromiseValue.Fail(callback) //.handleOneCallback(callback, CALLBACK_FAIL)
-	return this
-}
-
-//添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
-//传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
-func (this *Future) Always(callback func(v ...interface{})) *Future {
-	this.PromiseValue.Always(callback)
-	//this.handleOneCallback(callback, CALLBACK_ALWAYS)
-	return this
 }
 
 //Reslove表示任务正常完成
@@ -83,14 +48,44 @@ func (this *Future) Reject(v ...interface{}) (e error) {
 	return this.end(&futureResult{v, false})
 }
 
+//Set a future can be cancelled
 func (this *Future) EnableCanceller() *Future {
-	this.canceller = &canceller{new(sync.Mutex), false, false}
+	if this.canceller == nil {
+		this.canceller = &canceller{new(sync.Mutex), false, false}
+	}
 	return this
 }
 
-//Promise代表一个异步任务
+//添加一个任务成功完成时的回调，如果任务已经成功完成，则直接执行回调函数
+//传递给Done函数的参数与Reslove函数的参数相同
+func (this *Future) Done(callback func(v ...interface{})) *Future {
+	this.PromiseValue.Done(callback)
+	return this
+}
+
+//添加一个任务失败时的回调，如果任务已经失败，则直接执行回调函数
+//传递给Fail函数的参数与Reject函数的参数相同
+func (this *Future) Fail(callback func(v ...interface{})) *Future {
+	this.PromiseValue.Fail(callback)
+	return this
+}
+
+//添加一个回调函数，该函数将在任务完成后执行，无论成功或失败
+//传递给Always回调的参数根据成功或失败状态，与Reslove或Reject函数的参数相同
+func (this *Future) Always(callback func(v ...interface{})) *Future {
+	this.PromiseValue.Always(callback)
+	return this
+}
+
+//Cancel一个任务的interface
+type Canceller interface {
+	IsCancellationRequested() bool
+	SetIsCancelled()
+}
+
+//PromiseValue代表一个异步任务的结果
 type PromiseValue struct {
-	onceThen             *sync.Once
+	oncePipe             *sync.Once
 	lock                 *sync.Mutex
 	chOut                chan *futureResult
 	dones, fails, always []func(v ...interface{})
@@ -99,78 +94,35 @@ type PromiseValue struct {
 	*canceller //*PromiseCanceller
 }
 
-type Canceller interface {
-	Cancel() bool
-	HasAskCancel() bool
-	SetIsCancelled()
-	IsCancelled() bool
-}
-
-type canceller struct {
-	lock         *sync.Mutex
-	hasAskCancel bool
-	isCancelled  bool
-}
-
-//Cancel任务
-func (this *canceller) Cancel() bool {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.hasAskCancel = true
-	return true
-}
-
-//已经被要求取消任务
-func (this *canceller) HasAskCancel() bool {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	return this.hasAskCancel
-}
-
-//设置任务已经被Cancel
-func (this *canceller) SetIsCancelled() {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	this.isCancelled = true
-}
-
-//任务已经被Cancel
-func (this *canceller) IsCancelled() bool {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	return this.isCancelled
-}
-
+//获取Canceller接口，在异步任务内可以通过此对象查询任务是否已经被取消
 func (this *PromiseValue) Canceller() Canceller {
 	return this.canceller
 }
 
-//Cancel任务
-func (this *PromiseValue) Cancel() bool {
+//取消异步任务
+func (this *PromiseValue) Cancel() {
 	if this.canceller != nil {
-		return this.canceller.Cancel()
+		this.canceller.Cancel()
+	}
+}
+
+//获得任务是否已经被要求取消
+func (this *PromiseValue) IsCancellationRequested() bool {
+	if this.canceller != nil {
+		return this.canceller.IsCancellationRequested()
 	} else {
 		return false
 	}
 }
 
-//已经被要求取消任务
-func (this *PromiseValue) HasAskCancel() bool {
-	if this.canceller != nil {
-		return this.canceller.HasAskCancel()
-	} else {
-		return false
-	}
-}
-
-//设置任务已经被Cancel
+//设置任务为已被取消状态
 func (this *PromiseValue) SetIsCancelled() {
 	if this.canceller != nil {
 		this.canceller.SetIsCancelled()
 	}
 }
 
-//任务已经被Cancel
+//获得任务是否已经被Cancel
 func (this *PromiseValue) IsCancelled() bool {
 	if this.canceller != nil {
 		return this.canceller.IsCancelled()
@@ -190,11 +142,17 @@ func (this *PromiseValue) Get() ([]interface{}, bool) {
 	}
 }
 
-//Get函数将一直阻塞直到任务完成,并返回任务的结果
+//Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
 //如果任务已经完成，后续的Get将直接返回任务结果
+//mm的单位是微秒
 func (this *PromiseValue) GetOrTimeout(mm int) ([]interface{}, bool, bool) {
+	if mm == 0 {
+		mm = 10
+	} else {
+		mm = mm * 1000
+	}
 	select {
-	case <-time.After((time.Duration)(mm) * time.Millisecond):
+	case <-time.After((time.Duration)(mm) * time.Nanosecond):
 		return nil, false, true
 	case fr, ok := <-this.chOut:
 		if ok {
@@ -228,12 +186,12 @@ func (this *PromiseValue) Always(callback func(v ...interface{})) *PromiseValue 
 	return this
 }
 
-//for then api, the new Future object will be return
+//for Pipe api, the new Future object will be return
 //New future task object should be started after current future be done or failed
 //链式添加异步任务，可以同时定制Done或Fail状态下的链式异步任务，并返回一个新的异步对象。如果对此对象执行Done，Fail，Always操作，则新的回调函数将会被添加到链式的异步对象中
 //如果调用的参数超过2个，那第2个以后的参数将会被忽略
-//Then只能调用一次，第一次后的调用将被忽略
-func (this *PromiseValue) Then(callbacks ...(func(v ...interface{}) *PromiseValue)) (result *PromiseValue, ok bool) {
+//Pipe只能调用一次，第一次后的调用将被忽略
+func (this *PromiseValue) Pipe(callbacks ...(func(v ...interface{}) *PromiseValue)) (result *PromiseValue, ok bool) {
 	if len(callbacks) == 0 ||
 		(len(callbacks) == 1 && callbacks[0] == nil) ||
 		(len(callbacks) > 1 && callbacks[0] == nil && callbacks[1] == nil) {
@@ -241,7 +199,7 @@ func (this *PromiseValue) Then(callbacks ...(func(v ...interface{}) *PromiseValu
 		return
 	}
 
-	this.onceThen.Do(func() {
+	this.oncePipe.Do(func() {
 		this.lock.Lock()
 		defer this.lock.Unlock()
 		if this.r != nil {
@@ -264,6 +222,40 @@ func (this *PromiseValue) Then(callbacks ...(func(v ...interface{}) *PromiseValu
 		ok = true
 	})
 	return
+}
+
+type canceller struct {
+	lock        *sync.Mutex
+	isRequested bool
+	isCancelled bool
+}
+
+//Cancel任务
+func (this *canceller) Cancel() {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.isRequested = true
+}
+
+//已经被要求取消任务
+func (this *canceller) IsCancellationRequested() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return this.isRequested
+}
+
+//设置任务已经被Cancel
+func (this *canceller) SetIsCancelled() {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.isCancelled = true
+}
+
+//任务已经被Cancel
+func (this *canceller) IsCancelled() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return this.isCancelled
 }
 
 //完成一个任务
@@ -394,6 +386,13 @@ func Start(action func() []interface{}) *PromiseValue {
 	return start(action, false)
 }
 
+func StartCanCancel0(action func(canceller Canceller)) *PromiseValue {
+	return start(func(canceller Canceller) []interface{} {
+		action(canceller)
+		return make([]interface{}, 0, 0)
+	}, true)
+}
+
 func Start0(action func()) *PromiseValue {
 	return start(func() []interface{} {
 		action()
@@ -453,18 +452,26 @@ func Wrap(value interface{}) *PromiseValue {
 
 //Factory function for future
 func NewFuture() *Future {
-	f := &Future{new(sync.Once), &PromiseValue{new(sync.Once), new(sync.Mutex),
-		make(chan *futureResult, 1),
-		make([]func(v ...interface{}), 0, 8),
-		make([]func(v ...interface{}), 0, 8),
-		make([]func(v ...interface{}), 0, 4),
-		pipe{}, nil, nil},
+	f := &Future{new(sync.Once),
+		&PromiseValue{
+			new(sync.Once), new(sync.Mutex),
+			make(chan *futureResult, 1),
+			make([]func(v ...interface{}), 0, 8),
+			make([]func(v ...interface{}), 0, 8),
+			make([]func(v ...interface{}), 0, 4),
+			pipe{}, nil, nil,
+		},
 	}
 	return f
 }
 
+type anyFutureResult struct {
+	result []interface{}
+	i      int
+}
+
 //产生一个新的Future，如果列表中任意1个Future完成，则Future完成, 否则将触发Reject，参数为包含所有Future的Reject返回值的slice
-func Any(fs ...*PromiseValue) *PromiseValue {
+func WhenAny(fs ...*PromiseValue) *PromiseValue {
 	nf := NewFuture()
 	errors := make([]interface{}, len(fs), len(fs))
 	chFails := make(chan anyFutureResult)
@@ -502,7 +509,7 @@ func Any(fs ...*PromiseValue) *PromiseValue {
 }
 
 //产生一个新的Future，如果列表中所有Future都成功完成，则Future成功完成，否则失败
-func When(fs ...*PromiseValue) *PromiseValue {
+func WhenAll(fs ...*PromiseValue) *PromiseValue {
 	f := NewFuture()
 	if len(fs) == 0 {
 		f.Reslove()
@@ -533,6 +540,10 @@ func forSlice(s []func(v ...interface{}), f func(func(v ...interface{}))) {
 	for _, e := range s {
 		f(e)
 	}
+}
+
+type stringer interface {
+	String() string
 }
 
 func getError(i interface{}) (e error) {
