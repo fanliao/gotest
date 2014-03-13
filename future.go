@@ -144,12 +144,12 @@ func (this *PromiseValue) Get() ([]interface{}, bool) {
 
 //Get函数将一直阻塞直到任务完成或超过指定的Timeout时间
 //如果任务已经完成，后续的Get将直接返回任务结果
-//mm的单位是微秒
+//mm的单位是毫秒
 func (this *PromiseValue) GetOrTimeout(mm int) ([]interface{}, bool, bool) {
 	if mm == 0 {
 		mm = 10
 	} else {
-		mm = mm * 1000
+		mm = mm * 1000 * 1000
 	}
 	select {
 	case <-time.After((time.Duration)(mm) * time.Nanosecond):

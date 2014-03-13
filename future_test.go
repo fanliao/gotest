@@ -147,13 +147,13 @@ func TestGetOrTimeout(t *testing.T) {
 
 	AreEqual(order, []string{}, t)
 	//timeout
-	r, ok, timeout := f.GetOrTimeout(100 * 1000)
+	r, ok, timeout := f.GetOrTimeout(100)
 	AreEqual(timeout, true, t)
 
 	order = append(order, GET)
 	AreEqual(order, []string{GET}, t)
 	//get return value
-	r, ok, timeout = f.GetOrTimeout(470 * 1000)
+	r, ok, timeout = f.GetOrTimeout(470)
 	AreEqual(timeout, false, t)
 	AreEqual(order, []string{GET, TASK_END}, t)
 	AreEqual(r, []interface{}{10, "ok"}, t)
@@ -298,10 +298,8 @@ func TestWrap(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	order = make([]string, 0, 10)
 	i := 0
 	task := func(canceller Canceller) []interface{} {
-		order = append(order, "task be end,")
 		for i < 50 {
 			if canceller.IsCancellationRequested() {
 				canceller.SetIsCancelled()
@@ -310,6 +308,17 @@ func TestCancel(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		panic("exception")
+	}
+
+	f := StartCanCancel(task)
+	f.Cancel()
+	r, ok := f.Get()
+	AreEqual(r, nil, t)
+	AreEqual(ok, true, t)
+	AreEqual(f.IsCancelled(), true, t)
+
+	task1 := func() []interface{} {
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	f := StartCanCancel(task)
