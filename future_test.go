@@ -88,7 +88,7 @@ func TestFailAlways(t *testing.T) {
 
 func TestPipeWhenDone(t *testing.T) {
 	tObj = t
-	taskDonePipe := func(v ...interface{}) *PromiseValue {
+	taskDonePipe := func(v ...interface{}) *Future {
 		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, DONE_Pipe_END)
@@ -96,7 +96,7 @@ func TestPipeWhenDone(t *testing.T) {
 		})
 	}
 
-	taskFailPipe := func(v ...interface{}) *PromiseValue {
+	taskFailPipe := func(v ...interface{}) *Future {
 		return Start(func() []interface{} {
 			time.Sleep(100 * time.Millisecond)
 			order = append(order, FAIL_Pipe_END)
@@ -104,7 +104,7 @@ func TestPipeWhenDone(t *testing.T) {
 		})
 	}
 
-	SubmitWithCallback := func(task func() []interface{}) (*PromiseValue, bool) {
+	SubmitWithCallback := func(task func() []interface{}) (*Future, bool) {
 		return Start(task).Done(done).Fail(fail).
 			Pipe(taskDonePipe, taskFailPipe)
 	}
@@ -195,7 +195,7 @@ func TestException(t *testing.T) {
 }
 
 func TestAny(t *testing.T) {
-	startTwoTask := func(t1 int, t2 int) *PromiseValue {
+	startTwoTask := func(t1 int, t2 int) *Future {
 		timeout1 := time.Duration(t1)
 		timeout2 := time.Duration(t2)
 		task1 := func() (r []interface{}) {
@@ -244,7 +244,7 @@ func TestAny(t *testing.T) {
 }
 
 func TestWhen(t *testing.T) {
-	startTwoTask := func(t1 int, t2 int) *PromiseValue {
+	startTwoTask := func(t1 int, t2 int) *Future {
 		timeout1 := time.Duration(t1)
 		timeout2 := time.Duration(t2)
 		task1 := func() (r []interface{}) {
@@ -317,14 +317,27 @@ func TestCancel(t *testing.T) {
 	AreEqual(ok, true, t)
 	AreEqual(f.IsCancelled(), true, t)
 
+	task = func(canceller Canceller) []interface{} {
+		time.Sleep(100 * time.Millisecond)
+		return []interface{}{1}
+	}
+	f = StartCanCancel(task)
+	f.Cancel()
+	r, ok = f.Get()
+	AreEqual(r, []interface{}{1}, t)
+	AreEqual(ok, true, t)
+	AreEqual(f.IsCancelled(), false, t)
+
 	task1 := func() []interface{} {
 		time.Sleep(100 * time.Millisecond)
+		return []interface{}{1}
 	}
-
-	f := StartCanCancel(task)
-	f.Cancel()
-	r, ok := f.Get()
-	AreEqual(r, nil, t)
+	f = Start(task1)
+	c := f.Cancel()
+	r, ok = f.Get()
+	AreEqual(r, []interface{}{1}, t)
 	AreEqual(ok, true, t)
-	AreEqual(f.IsCancelled(), true, t)
+	AreEqual(f.IsCancelled(), false, t)
+	AreEqual(c, false, t)
+
 }
