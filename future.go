@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	//"fmt"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -262,6 +262,8 @@ func (this *Promise) end(r *PromiseResult) (e error) { //r *PromiseResult) {
 		e = getError(recover())
 	}()
 	e = errors.New("Cannoy resolve/reject more than once")
+	fmt.Println("this is", this)
+	fmt.Println("this.onceEnd is", this.onceEnd)
 	this.onceEnd.Do(func() {
 		//r := <-this.chIn
 		this.setResult(r)
@@ -303,14 +305,21 @@ func (this *Future) startPipe() {
 	var f *Future
 	if pipeTask != nil {
 		f = pipeTask(this.r.result...)
+		fmt.Println("get pipeTask as pipe")
 	} else {
 		f = this
+		fmt.Println("get this as pipe")
 	}
 
+	fmt.Println("pipePromise is", pipePromise)
 	f.Done(func(v ...interface{}) {
+		fmt.Println("Reslove pipePromise is", pipePromise)
 		pipePromise.Reslove(v...)
+		fmt.Println("done")
 	}).Fail(func(v ...interface{}) {
+		fmt.Println("Reject pipePromise is", pipePromise)
 		pipePromise.Reject(v...)
+		fmt.Println("done")
 	})
 
 }
@@ -424,19 +433,23 @@ func start(action interface{}, canCancel bool) *Future {
 		} else {
 			r = action1()
 		}
+
+		var err error
+		//fmt.Println("r.len is ", len(r), "is cancel?", fu.IsCancelled())
 		if l := len(r); l > 0 {
 			if done, ok := r[l-1].(bool); ok {
 				if done {
-					fu.Reslove(r[:l-1]...)
+					err = fu.Reslove(r[:l-1]...)
 				} else {
-					fu.Reject(r[:l-1]...)
+					err = fu.Reject(r[:l-1]...)
 				}
 			} else {
-				fu.Reslove(r...)
+				err = fu.Reslove(r...)
 			}
 		} else {
-			fu.Reslove(r...)
+			err = fu.Reslove(r...)
 		}
+		fmt.Println("err is ", err)
 	}()
 
 	return fu.Future

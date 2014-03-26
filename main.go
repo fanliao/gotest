@@ -20,6 +20,10 @@ type RWTestStruct1 struct {
 	a     int
 }
 
+func (this *RWTestStruct1) test() string {
+	return "a"
+}
+
 type RWTestStruct3 struct {
 	Id1   int
 	Name1 string
@@ -125,7 +129,11 @@ func main() {
 	//time.Sleep(1 * time.Second)
 	//close(c)
 	//time.Sleep(2 * time.Second)
+	o := &RWTestStruct1{}
+	o = nil
+	fmt.Println("o.test() return2 ", o.test(), "o is", o)
 
+	testPipeWhenDone()
 	testMakeFunc()
 
 }
@@ -435,6 +443,22 @@ func testCompare() {
 	//测试结果：
 	//uncomparable type：map, func, slice, 以及包含这些类型的struct
 	//其他类型可以比较，并且比较的是变量的byte数组内容，所以2个不同的数组只要内容相同就是相等
+}
+
+func testPipeWhenDone() {
+	task := func() []interface{} {
+		time.Sleep(100 * time.Millisecond)
+		return []interface{}{1}
+	}
+
+	//test Done branch for Pipe function
+	f := Start(task)
+	r, ok := f.Get()
+	time.Sleep(300 * time.Millisecond)
+
+	AreEqual(r, []interface{}{1}, nil)
+	AreEqual(ok, true, nil)
+
 }
 
 type methodTestStruct struct {

@@ -60,10 +60,10 @@ func isNil(a interface{}) (r bool) {
 	//fmt.Println("ValueOf is", reflect.ValueOf(a), "Kind is", reflect.ValueOf(a).Kind())
 	//fmt.Println("word is", *(*unsafe.Pointer)(unsafe.Pointer(faceToStruct(a).word)))
 	if a == nil {
-		//fmt.Println("is nil")
+		//fmt.Println(a, "is nil")
 		r = true
 	} else if reflect.ValueOf(a).IsNil() {
-		//fmt.Println("is nil, type is", reflect.TypeOf(a))
+		//fmt.Println(a, "is nil, type is", reflect.TypeOf(a))
 		r = true
 	} else {
 		r = false
@@ -95,7 +95,7 @@ func checkEquals(a interface{}, b interface{}, deep bool, visited map[visit]bool
 
 	aIsNil, bIsNil := isNil(a), isNil(b)
 	if aIsNil || bIsNil {
-		//fmt.Printf("isnil is %v %v\n", aIsNil, bIsNil)
+		//fmt.Printf("isnil is %v %v %v %v\n", aIsNil, bIsNil, a, b)
 		return aIsNil == bIsNil
 	}
 

@@ -313,9 +313,9 @@ func TestCancel(t *testing.T) {
 	f := StartCanCancel(task)
 	f.Cancel()
 	r, ok := f.Get()
-	AreEqual(r, nil, t)
-	AreEqual(ok, true, t)
 	AreEqual(f.IsCancelled(), true, t)
+	AreEqual(len(r), 0, t)
+	AreEqual(ok, true, t)
 
 	task = func(canceller Canceller) []interface{} {
 		time.Sleep(100 * time.Millisecond)
