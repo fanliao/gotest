@@ -4,6 +4,7 @@ import (
 	"fmt"
 	//"time"
 	"github.com/fanliao/go-promise"
+	"reflect"
 )
 
 // the struct and interface about data source---------------------------------------------------
@@ -36,13 +37,15 @@ func (this blockSource) Typ() int {
 func (this blockSource) Itr() func() (*chunk, bool) {
 	i := 0
 	len := len(this.data)
-	return func() (*chunk, bool) {
+	return func() (c *chunk, ok bool) {
 		if i < this.numberOfBlock {
 			end := (i+1)*this.sizeOfBlock - 1
 			if end >= len {
 				end = len
 			}
-			return &chunk{this.data, i * this.numberOfBlock, end}, true
+			c, ok = &chunk{this.data, i * this.sizeOfBlock, end}, true
+			i++
+			return
 		} else {
 			return nil, false
 		}
@@ -59,8 +62,11 @@ func (this chunkSource) Typ() int {
 }
 
 func (this chunkSource) Itr() func() (*chunk, bool) {
+	ch := this.data
 	return func() (*chunk, bool) {
-		c, ok := <-this.data
+		fmt.Println("begin from chan", this.data)
+		c, ok := <-ch
+		fmt.Println("from chan", c.start, c.end, ok)
 		return c, ok
 	}
 }
@@ -97,7 +103,6 @@ func where(sure func(interface{}) bool) stepAction {
 					result = append(result, true)
 					return result
 				})
-				fmt.Println("add", i)
 				fs[i] = f
 			}
 			f := promise.WhenAll(fs...)
@@ -109,29 +114,37 @@ func where(sure func(interface{}) bool) stepAction {
 				return blockSource{result, s.numberOfBlock, ceilSplitSize(len(result), s.numberOfBlock)}
 			}
 		case chunkSource:
-			itr := s.Itr()
+			//itr := s.Itr()
 			fs := make([]*promise.Future, s.numberOfBlock, s.numberOfBlock)
 			out := make(chan interface{})
 
 			for i := 0; i < s.numberOfBlock; i++ {
-				fs[i] = promise.Start(func() []interface{} {
-					for {
-						if chunk, ok := itr(); ok {
-							if chunk.end < chunk.start {
-								s.Close()
-								break
-							}
-							result := make([]interface{}, 0, chunk.end-chunk.start+2)
-							forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
-								if sure(v) {
-									result = append(result, v)
-								}
-							})
-							out <- result[0:len(result)]
-						} else {
+				j := i
+				fs[j] = promise.Start(func() []interface{} {
+					//fmt.Println("start", j)
+					//for {
+					//if chunk, ok := itr(); ok {
+					for chunk := range s.data {
+						//fmt.Println("get chunk...", chunk, reflect.ValueOf(chunk).IsNil())
+						if reflect.ValueOf(chunk).IsNil() {
+							//fmt.Println("close with nil", j)
+							s.Close()
 							break
 						}
+						result := make([]interface{}, 0, chunk.end-chunk.start+2)
+						forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
+							if sure(v) {
+								result = append(result, v)
+							}
+						})
+						//fmt.Println("get result...", result)
+						out <- result[0:len(result)]
 					}
+					//} else {
+					//break
+					//}
+					//}
+					//fmt.Println("return ", j)
 					return nil
 				})
 			}
@@ -142,13 +155,16 @@ func where(sure func(interface{}) bool) stepAction {
 			result := make([]interface{}, 0, 10)
 
 			reduce := promise.Start(func() []interface{} {
-				select {
-				case <-f.GetChan():
-					break
-				case v, _ := <-out:
-					//todo
-					//need improve the append()
-					result = append(result, (v.([]interface{}))...)
+				for {
+					select {
+					case <-f.GetChan():
+						return nil
+					case v, _ := <-out:
+						//todo
+						//need improve the append()
+						result = append(result, (v.([]interface{}))...)
+						//fmt.Println("result", result)
+					}
 				}
 				return nil
 			})
@@ -172,11 +188,13 @@ func expandSlice(src []interface{}) []interface{} {
 		count += len(sub.([]interface{}))
 	}
 
-	result := make([]interface{}, 0, count)
+	fmt.Println("count", count)
+	result := make([]interface{}, count, count)
 	start := 0
 	for _, sub := range src {
 		size := len(sub.([]interface{}))
 		copy(result[start:start+size], sub.([]interface{}))
+		start += size
 	}
 	return result
 }
