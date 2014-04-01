@@ -82,11 +82,11 @@ type queryableS struct {
 func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 	action := func(src []interface{}) []interface{} {
 		dst := make([]interface{}, 0, len(this.source))
-		forSlice(src, func(v interface{}) {
+		forSlice(src, func(v interface{}, out *[]interface{}) {
 			if sure(v) {
-				dst = append(dst, v)
+				*out = append(*out, v)
 			}
-		})
+		}, &dst)
 		return dst
 	}
 	this.actions = append(this.actions, action)
@@ -96,9 +96,9 @@ func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 func (this queryableS) Select(f func(interface{}) interface{}) queryableS {
 	action := func(src []interface{}) []interface{} {
 		dst := make([]interface{}, 0, len(this.source))
-		forSlice(src, func(v interface{}) {
-			dst = append(dst, f(v))
-		})
+		forSlice(src, func(v interface{}, out *[]interface{}) {
+			*out = append(*out, f(v))
+		}, &dst)
 		return dst
 	}
 	this.actions = append(this.actions, action)
@@ -148,7 +148,7 @@ func main() {
 	dst1 := q1.Where(func(v interface{}) bool {
 		i := v.(int)
 		//time.Sleep(10 * time.Nanosecond)
-		return i < 52
+		return i < 54
 	}).Get()
 	fmt.Println("dst1", dst1)
 

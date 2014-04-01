@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	//"fmt"
 	//"time"
 	"github.com/fanliao/go-promise"
 	"reflect"
@@ -94,119 +94,142 @@ type step struct {
 
 func where(sure func(interface{}) bool) stepAction {
 	return stepAction(func(src source) source {
+		var f *promise.Future
+
 		switch s := src.(type) {
 		case blockSource:
-			itr := s.Itr()
-			f := makeTasks(s, func() []interface{} {
+			f = makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
 				chunk, _ := itr()
-				result := make([]interface{}, 0, chunk.end-chunk.start+2)
-				forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
-					if sure(v) {
-						result = append(result, v)
-					}
-				})
-				result = append(result, true)
+				result := forChunk(chunk, whereAction(sure))
 				return result
 			})
-
-			if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
-				//todo
-				return nil
-			} else {
-				result := expandSlice(results)
-				return blockSource{result, s.numberOfBlock, ceilSplitSize(len(result), s.numberOfBlock)}
-			}
 		case chunkSource:
-			itr := s.Itr()
 			out := make(chan interface{})
 
-			f := makeTasks(s, func() []interface{} {
+			f1 := makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
 				for {
 					if chunk, ok := itr(); ok {
 						if reflect.ValueOf(chunk).IsNil() {
 							s.Close()
 							break
 						}
-						result := make([]interface{}, 0, chunk.end-chunk.start+2)
-						forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
-							if sure(v) {
-								result = append(result, v)
-							}
-						})
-						//fmt.Println("get result...", result)
-						out <- result[0:len(result)]
+						out <- forChunk(chunk, whereAction(sure))
 					} else {
 						break
 					}
 				}
 				return nil
-
 			})
 
-			//todo
-			//need to modify the hardcode 10
-			result := make([]interface{}, 0, 10)
-
-			reduce := promise.Start(func() []interface{} {
-				for {
-					select {
-					case <-f.GetChan():
-						return nil
-					case v, _ := <-out:
-						//todo
-						//need improve the append()
-						result = append(result, (v.([]interface{}))...)
-						//fmt.Println("result", result)
-					}
-				}
-				return nil
+			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
+				*result = append(*result, (v.([]interface{}))...)
 			})
+			//f = promise.Start(func() []interface{} {
+			//	//todo
+			//	//need to modify the hardcode 10
+			//	result := make([]interface{}, 0, 10)
+			//	for {
+			//		select {
+			//		case <-f1.GetChan():
+			//			return nil
+			//		case v, _ := <-out:
+			//			//todo
+			//			//need improve the append()
+			//			result = append(result, (v.([]interface{}))...)
+			//			//fmt.Println("result", result)
+			//		}
+			//	}
+			//	return result
+			//})
 
-			if _, typ := reduce.Get(); typ != promise.RESULT_SUCCESS {
-				//todo
-				return nil
-			} else {
-				return blockSource{result, s.numberOfBlock, ceilSplitSize(len(result), s.numberOfBlock)}
-			}
 		}
-		return nil
+		if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
+			//todo
+			return nil
+		} else {
+			result := expandSlice(results)
+			return blockSource{result, src.NumberOfBlock(), ceilSplitSize(len(result), src.NumberOfBlock())}
+		}
 	})
 
 }
 
+//actions---------------------------------------------
+func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interface{}) {
+	return func(v interface{}, out *[]interface{}) {
+		if sure(v) {
+			*out = append(*out, v)
+		}
+	}
+}
+
 //util funcs------------------------------------------
-func makeTasks(src source, task func() []interface{}) *promise.Future {
-	//itr := src.Itr()
+func makeTasks(src source, task func(func() (*chunk, bool)) []interface{}) *promise.Future {
+	itr := src.Itr()
 	degree := src.NumberOfBlock()
 	fs := make([]*promise.Future, degree, degree)
 	for i := 0; i < degree; i++ {
-		f := promise.Start(task)
+		f := promise.Start(func() []interface{} {
+			return task(itr)
+		})
 		fs[i] = f
 	}
 	f := promise.WhenAll(fs...)
+
 	return f
 }
 
-//func forChunk(c *chunk, f func(interface{}, out (*[]interface{}))) []interface{}{
-//	result := make([]interface{}, 0, chunk.end-chunk.start+2)
-//	forSlice(chunk.data[chunk.start:chunk.end+1], f)
-//	return result[0:len(result)]
+func makeSummaryTask(chEndFlag chan *promise.PromiseResult, out chan interface{},
+	summary func(interface{}, *[]interface{}),
+) *promise.Future {
+	f := promise.Start(func() []interface{} {
+		//todo
+		//need to modify the hardcode 10
+		result := make([]interface{}, 0, 10)
+		for {
+			select {
+			case <-chEndFlag:
+				return result
+			case v, _ := <-out:
+				//todo
+				//need improve the append()
+				summary(v, &result)
+			}
+		}
 
-//}
+		return result
+	})
 
-func forSlice(src []interface{}, f func(interface{})) {
+	return f
+}
+
+func forChunk(c *chunk, f func(interface{}, *[]interface{})) []interface{} {
+	result := make([]interface{}, 0, c.end-c.start+2)
+	forSlice(c.data[c.start:c.end+1], f, &result)
+	return result[0:len(result)]
+
+}
+
+func forSlice(src []interface{}, f func(interface{}, *[]interface{}), out *[]interface{}) {
 	for _, v := range src {
-		f(v)
+		f(v, out)
 	}
 }
 
 func expandSlice(src []interface{}) []interface{} {
+	if src == nil {
+		return nil
+	}
+	if _, hasSubSlice := src[0].([]interface{}); !hasSubSlice {
+		return src
+	}
+
 	count := 0
 	for _, sub := range src {
 		count += len(sub.([]interface{}))
 	}
 
-	fmt.Println("count", count)
+	//fmt.Println("count", count)
 	result := make([]interface{}, count, count)
 	start := 0
 	for _, sub := range src {
