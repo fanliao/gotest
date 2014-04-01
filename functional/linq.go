@@ -22,6 +22,7 @@ const (
 type source interface {
 	Typ() int                   //block or chunk?
 	Itr() func() (*chunk, bool) //return a itr function
+	NumberOfBlock() int         //get the degree of parallel
 }
 
 type blockSource struct {
@@ -52,6 +53,10 @@ func (this blockSource) Itr() func() (*chunk, bool) {
 	}
 }
 
+func (this blockSource) NumberOfBlock() int {
+	return this.numberOfBlock
+}
+
 type chunkSource struct {
 	data          chan *chunk
 	numberOfBlock int
@@ -64,11 +69,13 @@ func (this chunkSource) Typ() int {
 func (this chunkSource) Itr() func() (*chunk, bool) {
 	ch := this.data
 	return func() (*chunk, bool) {
-		fmt.Println("begin from chan", this.data)
 		c, ok := <-ch
-		fmt.Println("from chan", c.start, c.end, ok)
 		return c, ok
 	}
+}
+
+func (this chunkSource) NumberOfBlock() int {
+	return this.numberOfBlock
 }
 
 func (this chunkSource) Close() {
@@ -90,22 +97,18 @@ func where(sure func(interface{}) bool) stepAction {
 		switch s := src.(type) {
 		case blockSource:
 			itr := s.Itr()
-			fs := make([]*promise.Future, s.numberOfBlock, s.numberOfBlock)
-			for i := 0; i < s.numberOfBlock; i++ {
+			f := makeTasks(s, func() []interface{} {
 				chunk, _ := itr()
-				f := promise.Start(func() []interface{} {
-					result := make([]interface{}, 0, chunk.end-chunk.start+2)
-					forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
-						if sure(v) {
-							result = append(result, v)
-						}
-					})
-					result = append(result, true)
-					return result
+				result := make([]interface{}, 0, chunk.end-chunk.start+2)
+				forSlice(chunk.data[chunk.start:chunk.end+1], func(v interface{}) {
+					if sure(v) {
+						result = append(result, v)
+					}
 				})
-				fs[i] = f
-			}
-			f := promise.WhenAll(fs...)
+				result = append(result, true)
+				return result
+			})
+
 			if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
 				//todo
 				return nil
@@ -114,20 +117,13 @@ func where(sure func(interface{}) bool) stepAction {
 				return blockSource{result, s.numberOfBlock, ceilSplitSize(len(result), s.numberOfBlock)}
 			}
 		case chunkSource:
-			//itr := s.Itr()
-			fs := make([]*promise.Future, s.numberOfBlock, s.numberOfBlock)
+			itr := s.Itr()
 			out := make(chan interface{})
 
-			for i := 0; i < s.numberOfBlock; i++ {
-				j := i
-				fs[j] = promise.Start(func() []interface{} {
-					//fmt.Println("start", j)
-					//for {
-					//if chunk, ok := itr(); ok {
-					for chunk := range s.data {
-						//fmt.Println("get chunk...", chunk, reflect.ValueOf(chunk).IsNil())
+			f := makeTasks(s, func() []interface{} {
+				for {
+					if chunk, ok := itr(); ok {
 						if reflect.ValueOf(chunk).IsNil() {
-							//fmt.Println("close with nil", j)
 							s.Close()
 							break
 						}
@@ -139,17 +135,14 @@ func where(sure func(interface{}) bool) stepAction {
 						})
 						//fmt.Println("get result...", result)
 						out <- result[0:len(result)]
+					} else {
+						break
 					}
-					//} else {
-					//break
-					//}
-					//}
-					//fmt.Println("return ", j)
-					return nil
-				})
-			}
+				}
+				return nil
 
-			f := promise.WhenAll(fs...)
+			})
+
 			//todo
 			//need to modify the hardcode 10
 			result := make([]interface{}, 0, 10)
@@ -182,6 +175,31 @@ func where(sure func(interface{}) bool) stepAction {
 }
 
 //util funcs------------------------------------------
+func makeTasks(src source, task func() []interface{}) *promise.Future {
+	//itr := src.Itr()
+	degree := src.NumberOfBlock()
+	fs := make([]*promise.Future, degree, degree)
+	for i := 0; i < degree; i++ {
+		f := promise.Start(task)
+		fs[i] = f
+	}
+	f := promise.WhenAll(fs...)
+	return f
+}
+
+//func forChunk(c *chunk, f func(interface{}, out (*[]interface{}))) []interface{}{
+//	result := make([]interface{}, 0, chunk.end-chunk.start+2)
+//	forSlice(chunk.data[chunk.start:chunk.end+1], f)
+//	return result[0:len(result)]
+
+//}
+
+func forSlice(src []interface{}, f func(interface{})) {
+	for _, v := range src {
+		f(v)
+	}
+}
+
 func expandSlice(src []interface{}) []interface{} {
 	count := 0
 	for _, sub := range src {

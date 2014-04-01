@@ -113,12 +113,6 @@ func (this queryableS) Get() []interface{} {
 	return data
 }
 
-func forSlice(src []interface{}, f func(interface{})) {
-	for _, v := range src {
-		f(v)
-	}
-}
-
 func main() {
 	time.Now()
 	count := 100
@@ -183,5 +177,6 @@ func main() {
 	cs := chunkSource{chSrc, 2}
 	dst = whereAct(cs)
 	fmt.Println("dst of chunk", (dst.(blockSource)).data)
-	fmt.Println("Hello World")
+	fmt.Println("Hello World2")
+
 }
