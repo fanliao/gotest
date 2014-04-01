@@ -152,10 +152,10 @@ func main() {
 	}).Get()
 	fmt.Println("dst1", dst1)
 
-	s := blockSource{src1, 2, 50}
+	s := blockSource{src1, 2}
 	whereAct := where(func(v interface{}) bool {
 		i := v.(int)
-		return i < 53
+		return i%2 == 0
 	})
 	dst := whereAct(s)
 	fmt.Println("dst", (dst.(blockSource)).data)

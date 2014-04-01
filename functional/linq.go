@@ -28,7 +28,6 @@ type source interface {
 type blockSource struct {
 	data          []interface{}
 	numberOfBlock int //the count of block
-	sizeOfBlock   int //the size of block
 }
 
 func (this blockSource) Typ() int {
@@ -40,11 +39,12 @@ func (this blockSource) Itr() func() (*chunk, bool) {
 	len := len(this.data)
 	return func() (c *chunk, ok bool) {
 		if i < this.numberOfBlock {
-			end := (i+1)*this.sizeOfBlock - 1
+			size := ceilSplitSize(len, this.numberOfBlock)
+			end := (i+1)*size - 1
 			if end >= len {
 				end = len
 			}
-			c, ok = &chunk{this.data, i * this.sizeOfBlock, end}, true
+			c, ok = &chunk{this.data, i * size, end}, true
 			i++
 			return
 		} else {
@@ -98,9 +98,8 @@ func where(sure func(interface{}) bool) stepAction {
 
 		switch s := src.(type) {
 		case blockSource:
-			f = makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
-				chunk, _ := itr()
-				result := forChunk(chunk, whereAction(sure))
+			f = makeBlockTasks(s, func(c *chunk) []interface{} {
+				result := forChunk(c, whereAction(sure))
 				return result
 			})
 		case chunkSource:
@@ -130,7 +129,7 @@ func where(sure func(interface{}) bool) stepAction {
 			return nil
 		} else {
 			result := expandSlice(results)
-			return blockSource{result, src.NumberOfBlock(), ceilSplitSize(len(result), src.NumberOfBlock())}
+			return blockSource{result, src.NumberOfBlock()}
 		}
 	})
 
@@ -153,6 +152,31 @@ func makeTasks(src source, task func(func() (*chunk, bool)) []interface{}) *prom
 	for i := 0; i < degree; i++ {
 		f := promise.Start(func() []interface{} {
 			return task(itr)
+		})
+		fs[i] = f
+	}
+	f := promise.WhenAll(fs...)
+
+	return f
+}
+
+func makeBlockTasks(src source, task func(*chunk) []interface{}) *promise.Future {
+	degree := src.NumberOfBlock()
+
+	fs := make([]*promise.Future, degree, degree)
+	data := src.(blockSource).data
+	len := len(data)
+	size := ceilSplitSize(len, src.NumberOfBlock())
+	for i := 0; i < degree; i++ {
+		end := (i+1)*size - 1
+		if end >= len-1 {
+			end = len - 1
+		}
+		//fmt.Println("block, i=", i, ", size=", size, "end=", end)
+		c := &chunk{data, i * size, end}
+		//fmt.Println("block, c=", c.start, c.end)
+		f := promise.Start(func() []interface{} {
+			return task(c)
 		})
 		fs[i] = f
 	}
@@ -188,6 +212,8 @@ func makeSummaryTask(chEndFlag chan *promise.PromiseResult, out chan interface{}
 func forChunk(c *chunk, f func(interface{}, *[]interface{})) []interface{} {
 	result := make([]interface{}, 0, c.end-c.start+2)
 	forSlice(c.data[c.start:c.end+1], f, &result)
+	//fmt.Println("c=", c)
+	//fmt.Println("result=", result)
 	return result[0:len(result)]
 
 }
@@ -224,7 +250,7 @@ func expandSlice(src []interface{}) []interface{} {
 
 func ceilSplitSize(a int, b int) int {
 	if a%b != 0 {
-		return a + (b - (a % b))
+		return (a + (b - (a % b))) / b
 	} else {
 		return a / b
 	}
