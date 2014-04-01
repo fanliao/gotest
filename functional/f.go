@@ -114,7 +114,7 @@ func (this queryableS) Get() []interface{} {
 }
 
 func forSlice(src []interface{}, f func(interface{})) {
-	for v := range src {
+	for _, v := range src {
 		f(v)
 	}
 }
@@ -154,16 +154,34 @@ func main() {
 	dst1 := q1.Where(func(v interface{}) bool {
 		i := v.(int)
 		//time.Sleep(10 * time.Nanosecond)
-		return i < 50
+		return i < 52
 	}).Get()
 	fmt.Println("dst1", dst1)
 
 	s := blockSource{src1, 2, 50}
 	whereAct := where(func(v interface{}) bool {
 		i := v.(int)
-		return i < 50
+		return i < 53
 	})
 	dst := whereAct(s)
 	fmt.Println("dst", (dst.(blockSource)).data)
+
+	chSrc := make(chan *chunk)
+	go func() {
+		chSrc <- &chunk{src1, 0, 24}
+		chSrc <- &chunk{src1, 25, 49}
+		chSrc <- &chunk{src1, 50, 74}
+		chSrc <- &chunk{src1, 75, 99}
+		chSrc <- nil
+		fmt.Println("close src", chSrc)
+	}()
+
+	//for v := range chSrc {
+	//	fmt.Println(v)
+	//}
+
+	cs := chunkSource{chSrc, 2}
+	dst = whereAct(cs)
+	fmt.Println("dst of chunk", (dst.(blockSource)).data)
 	fmt.Println("Hello World")
 }
