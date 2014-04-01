@@ -124,24 +124,6 @@ func where(sure func(interface{}) bool) stepAction {
 			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
 				*result = append(*result, (v.([]interface{}))...)
 			})
-			//f = promise.Start(func() []interface{} {
-			//	//todo
-			//	//need to modify the hardcode 10
-			//	result := make([]interface{}, 0, 10)
-			//	for {
-			//		select {
-			//		case <-f1.GetChan():
-			//			return nil
-			//		case v, _ := <-out:
-			//			//todo
-			//			//need improve the append()
-			//			result = append(result, (v.([]interface{}))...)
-			//			//fmt.Println("result", result)
-			//		}
-			//	}
-			//	return result
-			//})
-
 		}
 		if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
 			//todo
