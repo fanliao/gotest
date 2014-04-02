@@ -168,7 +168,9 @@ func (this Queryable) Results() []interface{} {
 	for _, step := range this.steps {
 		switch step.typ {
 		case ACT_SELECT:
-
+			data.SetNumberOfBlock(numCPU)
+			whereAct := getSelect(step.act.(func(interface{}) interface{}))
+			data = whereAct(data)
 		case ACT_WHERE:
 			data.SetNumberOfBlock(numCPU)
 			whereAct := where(step.act.(func(interface{}) bool))
@@ -181,6 +183,11 @@ func (this Queryable) Results() []interface{} {
 
 func (this Queryable) Where(sure func(interface{}) bool) Queryable {
 	this.steps = append(this.steps, step{ACT_WHERE, sure, 0})
+	return this
+}
+
+func (this Queryable) Select(selectFunc func(interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, step{ACT_SELECT, selectFunc, 0})
 	return this
 }
 
@@ -234,12 +241,61 @@ func where(sure func(interface{}) bool) stepAction {
 
 }
 
+func getSelect(selectFunc func(interface{}) interface{}) stepAction {
+	return stepAction(func(src source) source {
+		var f *promise.Future
+
+		switch s := src.(type) {
+		case *blockSource:
+			f = makeBlockTasks(s, func(c *chunk) []interface{} {
+				result := forChunk(c, selectAction(selectFunc))
+				return result
+			})
+		case *chunkSource:
+			out := make(chan interface{})
+
+			f1 := makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
+				for {
+					if chunk, ok := itr(); ok {
+						if reflect.ValueOf(chunk).IsNil() {
+							s.Close()
+							break
+						}
+						out <- forChunk(chunk, selectAction(selectFunc))
+					} else {
+						break
+					}
+				}
+				return nil
+			})
+
+			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
+				*result = append(*result, (v.([]interface{}))...)
+			})
+		}
+		if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
+			//todo
+			return nil
+		} else {
+			result := expandSlice(results)
+			return &blockSource{result, src.NumberOfBlock()}
+		}
+	})
+
+}
+
 //actions---------------------------------------------
 func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interface{}) {
 	return func(v interface{}, out *[]interface{}) {
 		if sure(v) {
 			*out = append(*out, v)
 		}
+	}
+}
+
+func selectAction(s func(interface{}) interface{}) func(v interface{}, out *[]interface{}) {
+	return func(v interface{}, out *[]interface{}) {
+		*out = append(*out, s(v))
 	}
 }
 

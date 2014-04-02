@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -160,6 +161,9 @@ func main() {
 	dst := From(src1).Where(func(v interface{}) bool {
 		i := v.(int)
 		return i%2 == 0
+	}).Select(func(v interface{}) interface{} {
+		i := v.(int)
+		return "item" + strconv.Itoa(i)
 	}).Results()
 	fmt.Println("dst", dst)
 

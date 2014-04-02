@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	count    int = 10000
+	count    int = 100000
 	MAXPROCS int = 4
 )
 
@@ -41,6 +41,11 @@ func whereUser(v interface{}) bool {
 	u := v.(user)
 	//time.Sleep(10 * time.Nanosecond)
 	return u.id%2 == 0
+}
+
+func selectUser(v interface{}) interface{} {
+	u := v.(user)
+	return strconv.Itoa(u.id) + "/" + u.name
 }
 
 func select1(v interface{}) interface{} {
@@ -122,6 +127,54 @@ func BenchmarkGoLinqParallelWhere(b *testing.B) {
 		dst, _ := linq.From(arrUser).AsParallel().Where(func(i linq.T) (bool, error) {
 			v := i.(user)
 			return v.id%2 == 0, nil
+		}).Results()
+		if len(dst) != count/2 {
+			b.Fail()
+			b.Error("size is ", len(dst))
+		}
+	}
+}
+
+func BenchmarkBlockSourceSelectWhere(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		// := blockSource{arrUser, MAXPROCS}
+		//whereAct := where(whereUser)
+		//dst := (whereAct(s).(blockSource)).data
+
+		dst := From(arrUser).Where(whereUser).Select(selectUser).Results()
+		if len(dst) != count/2 {
+			b.Fail()
+			b.Log("arr=", arr)
+			b.Error("size is ", len(dst))
+			b.Log("dst=", dst)
+		}
+	}
+}
+
+func BenchmarkGoLinqSelectWhere(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).Where(func(i linq.T) (bool, error) {
+			v := i.(user)
+			return v.id%2 == 0, nil
+		}).Select(func(v linq.T) (linq.T, error) {
+			u := v.(user)
+			return strconv.Itoa(u.id) + "/" + u.name, nil
+		}).Results()
+		if len(dst) != count/2 {
+			b.Fail()
+			b.Error("size is ", len(dst))
+		}
+	}
+}
+
+func BenchmarkGoLinqParallelSelectWhere(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).AsParallel().Where(func(i linq.T) (bool, error) {
+			v := i.(user)
+			return v.id%2 == 0, nil
+		}).Select(func(v linq.T) (linq.T, error) {
+			u := v.(user)
+			return strconv.Itoa(u.id) + "/" + u.name, nil
 		}).Results()
 		if len(dst) != count/2 {
 			b.Fail()
