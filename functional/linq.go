@@ -1,11 +1,23 @@
 package main
 
 import (
-	//"fmt"
+	"fmt"
 	//"time"
+	"errors"
 	"github.com/fanliao/go-promise"
 	"reflect"
+	"runtime"
 )
+
+var (
+	numCPU             int
+	ErrUnsupportSource = errors.New("unsupport source")
+)
+
+func init() {
+	numCPU = runtime.NumCPU()
+	fmt.Println("go linq")
+}
 
 // the struct and interface about data source---------------------------------------------------
 type chunk struct {
@@ -19,10 +31,20 @@ const (
 	SOURCE_CHUNK
 )
 
+const (
+	ACT_SELECT int = iota
+	ACT_WHERE
+	ACT_GROUPBY
+	ACT_ORDERBY
+)
+
 type source interface {
 	Typ() int                   //block or chunk?
 	Itr() func() (*chunk, bool) //return a itr function
 	NumberOfBlock() int         //get the degree of parallel
+	SetNumberOfBlock(int)
+	ToSlice() []interface{}
+	ToChan() chan interface{}
 }
 
 type blockSource struct {
@@ -32,6 +54,10 @@ type blockSource struct {
 
 func (this blockSource) Typ() int {
 	return SOURCE_BLOCK
+}
+
+func (this *blockSource) SetNumberOfBlock(n int) {
+	this.numberOfBlock = n
 }
 
 func (this blockSource) Itr() func() (*chunk, bool) {
@@ -57,6 +83,21 @@ func (this blockSource) NumberOfBlock() int {
 	return this.numberOfBlock
 }
 
+func (this blockSource) ToSlice() []interface{} {
+	return this.data
+}
+
+func (this blockSource) ToChan() chan interface{} {
+	out := make(chan interface{})
+	go func() {
+		for _, v := range this.data {
+			out <- v
+		}
+		close(out)
+	}()
+	return out
+}
+
 type chunkSource struct {
 	data          chan *chunk
 	numberOfBlock int
@@ -64,6 +105,10 @@ type chunkSource struct {
 
 func (this chunkSource) Typ() int {
 	return SOURCE_CHUNK
+}
+
+func (this chunkSource) SetNumberOfBlock(n int) {
+	this.numberOfBlock = n
 }
 
 func (this chunkSource) Itr() func() (*chunk, bool) {
@@ -82,13 +127,67 @@ func (this chunkSource) Close() {
 	close(this.data)
 }
 
+func (this chunkSource) ToSlice() []interface{} {
+	return nil
+}
+
+func (this chunkSource) ToChan() chan interface{} {
+	return nil
+}
+
 type stepAction func(source) source
+
+//the queryable struct-------------------------------------------------------------------------
+type Queryable struct {
+	data  source
+	steps []step
+}
+
+func From(src interface{}) (q Queryable) {
+	q = Queryable{}
+	q.steps = make([]step, 0, 4)
+
+	if s, ok := src.([]interface{}); ok {
+		q.data = &blockSource{data: s}
+	} else {
+		typ := reflect.TypeOf(src)
+		switch typ.Kind() {
+		case reflect.Slice:
+
+		case reflect.Chan:
+		case reflect.Map:
+		default:
+		}
+		panic(ErrUnsupportSource)
+	}
+	return
+}
+
+func (this Queryable) Results() []interface{} {
+	data := this.data
+	for _, step := range this.steps {
+		switch step.typ {
+		case ACT_SELECT:
+
+		case ACT_WHERE:
+			data.SetNumberOfBlock(numCPU)
+			whereAct := where(step.act.(func(interface{}) bool))
+			data = whereAct(data)
+
+		}
+	}
+	return data.ToSlice()
+}
+
+func (this Queryable) Where(sure func(interface{}) bool) Queryable {
+	this.steps = append(this.steps, step{ACT_WHERE, sure, 0})
+	return this
+}
 
 //the function of step-------------------------------------------------------------------------
 type step struct {
-	src    source
-	act    stepAction
-	result source
+	typ    int
+	act    interface{}
 	degree int
 }
 
@@ -97,12 +196,12 @@ func where(sure func(interface{}) bool) stepAction {
 		var f *promise.Future
 
 		switch s := src.(type) {
-		case blockSource:
+		case *blockSource:
 			f = makeBlockTasks(s, func(c *chunk) []interface{} {
 				result := forChunk(c, whereAction(sure))
 				return result
 			})
-		case chunkSource:
+		case *chunkSource:
 			out := make(chan interface{})
 
 			f1 := makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
@@ -129,7 +228,7 @@ func where(sure func(interface{}) bool) stepAction {
 			return nil
 		} else {
 			result := expandSlice(results)
-			return blockSource{result, src.NumberOfBlock()}
+			return &blockSource{result, src.NumberOfBlock()}
 		}
 	})
 
@@ -164,7 +263,7 @@ func makeBlockTasks(src source, task func(*chunk) []interface{}) *promise.Future
 	degree := src.NumberOfBlock()
 
 	fs := make([]*promise.Future, degree, degree)
-	data := src.(blockSource).data
+	data := src.(*blockSource).data
 	len := len(data)
 	size := ceilSplitSize(len, src.NumberOfBlock())
 	for i := 0; i < degree; i++ {

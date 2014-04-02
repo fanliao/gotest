@@ -4,29 +4,43 @@ import (
 	"github.com/ahmetalpbalkan/go-linq"
 	"math"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
 const (
 	count    int = 10000
-	MAXPROCS int = 3
+	MAXPROCS int = 4
 )
 
 var (
-	arr []interface{} = make([]interface{}, count, count)
+	arr     []interface{} = make([]interface{}, count, count)
+	arrUser []interface{} = make([]interface{}, count, count)
 )
 
 func init() {
 	runtime.GOMAXPROCS(MAXPROCS)
 	for i := 0; i < count; i++ {
 		arr[i] = i
+		arrUser[i] = user{i, "user" + strconv.Itoa(i)}
 	}
+}
+
+type user struct {
+	id   int
+	name string
 }
 
 func where1(v interface{}) bool {
 	i := v.(int)
 	//time.Sleep(10 * time.Nanosecond)
 	return i%2 == 0
+}
+
+func whereUser(v interface{}) bool {
+	u := v.(user)
+	//time.Sleep(10 * time.Nanosecond)
+	return u.id%2 == 0
 }
 
 func select1(v interface{}) interface{} {
@@ -62,10 +76,10 @@ func select2(v interface{}) interface{} {
 //	}
 //}
 
-func BenchmarkSyncStep(b *testing.B) {
+func BenchmarkSyncWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		q := queryableS{arr, make([]func([]interface{}) []interface{}, 0, 1)}
-		dst := q.Where(where1).Get()
+		q := queryableS{arrUser, make([]func([]interface{}) []interface{}, 0, 1)}
+		dst := q.Where(whereUser).Get()
 
 		if len(dst) != count/2 {
 			b.Fail()
@@ -74,12 +88,13 @@ func BenchmarkSyncStep(b *testing.B) {
 	}
 }
 
-func BenchmarkBlockSourceStep(b *testing.B) {
+func BenchmarkBlockSourceWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		s := blockSource{arr, MAXPROCS}
-		whereAct := where(where1)
-		dst := (whereAct(s).(blockSource)).data
+		// := blockSource{arrUser, MAXPROCS}
+		//whereAct := where(whereUser)
+		//dst := (whereAct(s).(blockSource)).data
 
+		dst := From(arrUser).Where(whereUser).Results()
 		if len(dst) != count/2 {
 			b.Fail()
 			b.Log("arr=", arr)
@@ -91,9 +106,9 @@ func BenchmarkBlockSourceStep(b *testing.B) {
 
 func BenchmarkGoLinqWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arr).Where(func(i linq.T) (bool, error) {
-			v := i.(int)
-			return v%2 == 0, nil
+		dst, _ := linq.From(arrUser).Where(func(i linq.T) (bool, error) {
+			v := i.(user)
+			return v.id%2 == 0, nil
 		}).Results()
 		if len(dst) != count/2 {
 			b.Fail()
@@ -104,9 +119,9 @@ func BenchmarkGoLinqWhere(b *testing.B) {
 
 func BenchmarkGoLinqParallelWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arr).AsParallel().Where(func(i linq.T) (bool, error) {
-			v := i.(int)
-			return v%2 == 0, nil
+		dst, _ := linq.From(arrUser).AsParallel().Where(func(i linq.T) (bool, error) {
+			v := i.(user)
+			return v.id%2 == 0, nil
 		}).Results()
 		if len(dst) != count/2 {
 			b.Fail()

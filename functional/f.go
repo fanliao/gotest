@@ -152,31 +152,36 @@ func main() {
 	}).Get()
 	fmt.Println("dst1", dst1)
 
-	s := blockSource{src1, 2}
-	whereAct := where(func(v interface{}) bool {
+	//s := blockSource{src1, 2}
+	//whereAct := where(func(v interface{}) bool {
+	//	i := v.(int)
+	//	return i%2 == 0
+	//})
+	dst := From(src1).Where(func(v interface{}) bool {
 		i := v.(int)
 		return i%2 == 0
-	})
-	dst := whereAct(s)
-	fmt.Println("dst", (dst.(blockSource)).data)
+	}).Results()
+	fmt.Println("dst", dst)
 
-	chSrc := make(chan *chunk)
-	go func() {
-		chSrc <- &chunk{src1, 0, 24}
-		chSrc <- &chunk{src1, 25, 49}
-		chSrc <- &chunk{src1, 50, 74}
-		chSrc <- &chunk{src1, 75, 99}
-		chSrc <- nil
-		fmt.Println("close src", chSrc)
-	}()
+	//chSrc := make(chan *chunk)
+	//go func() {
+	//	chSrc <- &chunk{src1, 0, 24}
+	//	chSrc <- &chunk{src1, 25, 49}
+	//	chSrc <- &chunk{src1, 50, 74}
+	//	chSrc <- &chunk{src1, 75, 99}
+	//	chSrc <- nil
+	//	fmt.Println("close src", chSrc)
+	//}()
 
-	//for v := range chSrc {
-	//	fmt.Println(v)
-	//}
+	////for v := range chSrc {
+	////	fmt.Println(v)
+	////}
 
-	cs := chunkSource{chSrc, 2}
-	dst = whereAct(cs)
-	fmt.Println("dst of chunk", (dst.(blockSource)).data)
-	fmt.Println("Hello World2")
+	//cs := chunkSource{chSrc, 2}
+	//dst = whereAct(cs)
+	//fmt.Println("dst of chunk", (dst.(blockSource)).data)
+	//fmt.Println("Hello World2")
+
+	//fmt.Println("s" + strconv.Itoa(100000))
 
 }
