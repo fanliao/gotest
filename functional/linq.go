@@ -22,8 +22,9 @@ func init() {
 // the struct and interface about data source---------------------------------------------------
 type chunk struct {
 	data  []interface{}
-	start int
-	end   int
+	order int
+	//start int
+	//end   int
 }
 
 const (
@@ -39,9 +40,8 @@ const (
 )
 
 type source interface {
-	Typ() int                   //block or chunk?
-	Itr() func() (*chunk, bool) //return a itr function
-	NumberOfBlock() int         //get the degree of parallel
+	Typ() int           //block or chunk?
+	NumberOfBlock() int //get the degree of parallel
 	SetNumberOfBlock(int)
 	ToSlice() []interface{}
 	ToChan() chan interface{}
@@ -58,25 +58,6 @@ func (this blockSource) Typ() int {
 
 func (this *blockSource) SetNumberOfBlock(n int) {
 	this.numberOfBlock = n
-}
-
-func (this blockSource) Itr() func() (*chunk, bool) {
-	i := 0
-	len := len(this.data)
-	return func() (c *chunk, ok bool) {
-		if i < this.numberOfBlock {
-			size := ceilSplitSize(len, this.numberOfBlock)
-			end := (i+1)*size - 1
-			if end >= len {
-				end = len
-			}
-			c, ok = &chunk{this.data, i * size, end}, true
-			i++
-			return
-		} else {
-			return nil, false
-		}
-	}
 }
 
 func (this blockSource) NumberOfBlock() int {
@@ -206,19 +187,20 @@ func where(sure func(interface{}) bool) stepAction {
 		case *blockSource:
 			f = makeBlockTasks(s, func(c *chunk) []interface{} {
 				result := forChunk(c, whereAction(sure))
-				return result
+				//fmt.Println("src=", c, "result=", result)
+				return []interface{}{result, true}
 			})
 		case *chunkSource:
-			out := make(chan interface{})
+			out := make(chan *chunk)
 
 			f1 := makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
 				for {
-					if chunk, ok := itr(); ok {
-						if reflect.ValueOf(chunk).IsNil() {
+					if c, ok := itr(); ok {
+						if reflect.ValueOf(c).IsNil() {
 							s.Close()
 							break
 						}
-						out <- forChunk(chunk, whereAction(sure))
+						out <- forChunk(c, whereAction(sure))
 					} else {
 						break
 					}
@@ -227,7 +209,7 @@ func where(sure func(interface{}) bool) stepAction {
 			})
 
 			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
-				*result = append(*result, (v.([]interface{}))...)
+				*result = append(*result, (v.(*chunk).data)...)
 			})
 		}
 		if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
@@ -247,21 +229,38 @@ func getSelect(selectFunc func(interface{}) interface{}) stepAction {
 
 		switch s := src.(type) {
 		case *blockSource:
+			results := make([]interface{}, len(s.data), len(s.data))
 			f = makeBlockTasks(s, func(c *chunk) []interface{} {
-				result := forChunk(c, selectAction(selectFunc))
-				return result
+				//result := forChunk(c, selectAction(selectFunc))
+				out := results[c.order : c.order+len(c.data)]
+				//fmt.Println("(c)=", (c), c.order, c.order+len(c.data), "out=", out)
+				forSlice2(c.data, selectAction(selectFunc), &out)
+				//fmt.Println("(out)=", (out))
+				//copy(results[c.order:c.order+len(c.data)], result.data)
+				return nil
 			})
+			if _, typ := f.Get(); typ != promise.RESULT_SUCCESS {
+				//todo
+				return nil
+			} else {
+				//fmt.Println("(results)=", (results))
+				return &blockSource{results, src.NumberOfBlock()}
+			}
 		case *chunkSource:
-			out := make(chan interface{})
+			out := make(chan *chunk)
 
-			f1 := makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
+			_ = makeTasks(s, func(itr func() (*chunk, bool)) []interface{} {
 				for {
-					if chunk, ok := itr(); ok {
-						if reflect.ValueOf(chunk).IsNil() {
+					if c, ok := itr(); ok {
+						if reflect.ValueOf(c).IsNil() {
 							s.Close()
 							break
 						}
-						out <- forChunk(chunk, selectAction(selectFunc))
+						result := make([]interface{}, 0, len(c.data)) //c.end-c.start+2)
+						forSlice2(c.data, selectAction(selectFunc), &result)
+						//fmt.Println("c=", c)
+						//fmt.Println("result=", result)
+						out <- &chunk{result, c.order}
 					} else {
 						break
 					}
@@ -269,17 +268,11 @@ func getSelect(selectFunc func(interface{}) interface{}) stepAction {
 				return nil
 			})
 
-			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
-				*result = append(*result, (v.([]interface{}))...)
-			})
+			//todo: how to handle error in promise?
+			return &chunkSource{out, src.NumberOfBlock()}
 		}
-		if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
-			//todo
-			return nil
-		} else {
-			result := expandSlice(results)
-			return &blockSource{result, src.NumberOfBlock()}
-		}
+
+		panic(ErrUnsupportSource)
 	})
 
 }
@@ -293,20 +286,22 @@ func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interfa
 	}
 }
 
-func selectAction(s func(interface{}) interface{}) func(v interface{}, out *[]interface{}) {
-	return func(v interface{}, out *[]interface{}) {
-		*out = append(*out, s(v))
+func selectAction(s func(interface{}) interface{}) func(v interface{}, out *[]interface{}, i int) {
+	return func(v interface{}, out *[]interface{}, i int) {
+		(*out)[i] = s(v)
 	}
 }
 
 //util funcs------------------------------------------
-func makeTasks(src source, task func(func() (*chunk, bool)) []interface{}) *promise.Future {
+func makeTasks(src *chunkSource, task func(func() (*chunk, bool)) []interface{}) *promise.Future {
 	itr := src.Itr()
 	degree := src.NumberOfBlock()
 	fs := make([]*promise.Future, degree, degree)
 	for i := 0; i < degree; i++ {
 		f := promise.Start(func() []interface{} {
-			return task(itr)
+			r := task(itr)
+			//fmt.Println("r=", r)
+			return r
 		})
 		fs[i] = f
 	}
@@ -322,25 +317,26 @@ func makeBlockTasks(src source, task func(*chunk) []interface{}) *promise.Future
 	data := src.(*blockSource).data
 	len := len(data)
 	size := ceilSplitSize(len, src.NumberOfBlock())
-	for i := 0; i < degree; i++ {
-		end := (i+1)*size - 1
-		if end >= len-1 {
-			end = len - 1
+	j := 0
+	for i := 0; i < degree && i*size < len; i++ {
+		end := (i + 1) * size
+		if end >= len {
+			end = len
 		}
-		//fmt.Println("block, i=", i, ", size=", size, "end=", end)
-		c := &chunk{data, i * size, end}
-		//fmt.Println("block, c=", c.start, c.end)
+		c := &chunk{data[i*size : end], i * size} //, end}
 		f := promise.Start(func() []interface{} {
-			return task(c)
+			r := task(c)
+			return r
 		})
 		fs[i] = f
+		j++
 	}
-	f := promise.WhenAll(fs...)
+	f := promise.WhenAll(fs[0:j]...)
 
 	return f
 }
 
-func makeSummaryTask(chEndFlag chan *promise.PromiseResult, out chan interface{},
+func makeSummaryTask(chEndFlag chan *promise.PromiseResult, out chan *chunk,
 	summary func(interface{}, *[]interface{}),
 ) *promise.Future {
 	f := promise.Start(func() []interface{} {
@@ -364,13 +360,12 @@ func makeSummaryTask(chEndFlag chan *promise.PromiseResult, out chan interface{}
 	return f
 }
 
-func forChunk(c *chunk, f func(interface{}, *[]interface{})) []interface{} {
-	result := make([]interface{}, 0, c.end-c.start+2)
-	forSlice(c.data[c.start:c.end+1], f, &result)
+func forChunk(c *chunk, f func(interface{}, *[]interface{})) *chunk {
+	result := make([]interface{}, 0, len(c.data)+1) //c.end-c.start+2)
+	forSlice(c.data, f, &result)
 	//fmt.Println("c=", c)
 	//fmt.Println("result=", result)
-	return result[0:len(result)]
-
+	return &chunk{result[0:len(result)], c.order}
 }
 
 func forSlice(src []interface{}, f func(interface{}, *[]interface{}), out *[]interface{}) {
@@ -379,25 +374,34 @@ func forSlice(src []interface{}, f func(interface{}, *[]interface{}), out *[]int
 	}
 }
 
+func forSlice2(src []interface{}, f func(interface{}, *[]interface{}, int), out *[]interface{}) {
+	for i, v := range src {
+		f(v, out, i)
+	}
+}
+
 func expandSlice(src []interface{}) []interface{} {
 	if src == nil {
 		return nil
 	}
-	if _, hasSubSlice := src[0].([]interface{}); !hasSubSlice {
-		return src
+
+	chunks := make([]*chunk, len(src), len(src))
+	for i, c := range src {
+		chunks[i] = c.([]interface{})[0].(*chunk)
+		//fmt.Println("chunks[i]", i, "=", chunks[i])
 	}
 
 	count := 0
-	for _, sub := range src {
-		count += len(sub.([]interface{}))
+	for _, c := range chunks {
+		count += len(c.data)
 	}
 
 	//fmt.Println("count", count)
 	result := make([]interface{}, count, count)
 	start := 0
-	for _, sub := range src {
-		size := len(sub.([]interface{}))
-		copy(result[start:start+size], sub.([]interface{}))
+	for _, c := range chunks {
+		size := len(c.data)
+		copy(result[start:start+size], c.data)
 		start += size
 	}
 	return result

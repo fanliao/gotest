@@ -165,6 +165,10 @@ func main() {
 		i := v.(int)
 		return "item" + strconv.Itoa(i)
 	}).Results()
+	//dst := From(src1).Where(func(v interface{}) bool {
+	//	i := v.(int)
+	//	return i%2 == 0
+	//}).Results()
 	fmt.Println("dst", dst)
 
 	//chSrc := make(chan *chunk)
@@ -187,5 +191,8 @@ func main() {
 	//fmt.Println("Hello World2")
 
 	//fmt.Println("s" + strconv.Itoa(100000))
+
+	s := []interface{}{0, 1, 2}
+	fmt.Println(s[0:3])
 
 }

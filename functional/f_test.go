@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	count    int = 100000
+	count    int = 10000
 	MAXPROCS int = 4
 )
 
@@ -56,31 +56,6 @@ func select2(v interface{}) interface{} {
 	return math.Sin(math.Cos(math.Pow(float64(v.(int)), 2)))
 }
 
-//func BenchmarkAsyncStep(b *testing.B) {
-//	for i := 0; i < b.N; i++ {
-//		src := make(chan interface{}, 1)
-//		go func() {
-//			for i := 0; i < count; i++ {
-//				src <- i
-//			}
-//			close(src)
-//		}()
-
-//		q := queryable{src, make([]func(chan interface{}) chan interface{}, 0, 1)}
-//		dst := q.Where(where1).Select(select1).Select(select2).Get()
-
-//		j := 0
-//		for v := range dst {
-//			_ = v
-//			j = j + 1
-//		}
-//		if j != 5000 {
-//			b.Fail()
-//			b.Error("size is ", j)
-//		}
-//	}
-//}
-
 func BenchmarkSyncWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		q := queryableS{arrUser, make([]func([]interface{}) []interface{}, 0, 1)}
@@ -95,10 +70,6 @@ func BenchmarkSyncWhere(b *testing.B) {
 
 func BenchmarkBlockSourceWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		// := blockSource{arrUser, MAXPROCS}
-		//whereAct := where(whereUser)
-		//dst := (whereAct(s).(blockSource)).data
-
 		dst := From(arrUser).Where(whereUser).Results()
 		if len(dst) != count/2 {
 			b.Fail()
@@ -137,10 +108,6 @@ func BenchmarkGoLinqParallelWhere(b *testing.B) {
 
 func BenchmarkBlockSourceSelectWhere(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		// := blockSource{arrUser, MAXPROCS}
-		//whereAct := where(whereUser)
-		//dst := (whereAct(s).(blockSource)).data
-
 		dst := From(arrUser).Where(whereUser).Select(selectUser).Results()
 		if len(dst) != count/2 {
 			b.Fail()
