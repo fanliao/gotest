@@ -192,7 +192,36 @@ func main() {
 
 	//fmt.Println("s" + strconv.Itoa(100000))
 
-	s := []interface{}{0, 1, 2}
-	fmt.Println(s[0:3])
-
+	a := []interface{}{3, 2, 1, 4, 5, 6, 7, 10, 9, 8}
+	avl := &avlTree{nil, 0, func(a interface{}, b interface{}) int {
+		a1, b1 := a.(int), b.(int)
+		if a1 < b1 {
+			return -1
+		} else if a1 == b1 {
+			return 0
+		} else {
+			return 1
+		}
+	}}
+	//var taller bool
+	//var tree *avlNode
+	for i := 0; i < 10; i++ {
+		//InsertAVL(&tree, a[i], &taller, func(a interface{}, b interface{}) int {
+		//	a1, b1 := a.(int), b.(int)
+		//	if a1 < b1 {
+		//		return -1
+		//	} else if a1 == b1 {
+		//		return 0
+		//	} else {
+		//		return 1
+		//	}
+		//})
+		avl.Insert(a[i])
+		//fmt.Println("root=", *tree)
+	}
+	//_ = taller
+	//result := make([]interface{}, 0, 10)
+	//avlToSlice(tree, &result)
+	result := avl.ToSlice()
+	fmt.Println("avl result=", result, "count=", avl.count)
 }
