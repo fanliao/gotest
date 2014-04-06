@@ -7,6 +7,7 @@ import (
 	"github.com/fanliao/go-promise"
 	"reflect"
 	"runtime"
+	"sort"
 )
 
 var (
@@ -30,13 +31,7 @@ type chunk struct {
 const (
 	SOURCE_BLOCK int = iota
 	SOURCE_CHUNK
-)
-
-const (
-	ACT_SELECT int = iota
-	ACT_WHERE
-	ACT_GROUPBY
-	ACT_ORDERBY
+	SOURCE_MAP
 )
 
 type source interface {
@@ -89,11 +84,20 @@ func (this chunkSource) Close() {
 }
 
 func (this chunkSource) ToSlice() []interface{} {
-	result := make([]interface{}, 0, 10)
+	chunks := make([]*chunk, 0, 10)
 	for c := range this.data {
-		for _, v := range c.data {
-			result = append(result, v)
-		}
+		chunks = append(chunks, c)
+	}
+
+	count := 0
+	for _, c := range chunks {
+		count = count + len(c.data)
+	}
+
+	result := make([]interface{}, 0, count)
+	start := 0
+	for _, c := range chunks {
+		copy(result[start:start+len(c.data)], c.data)
 	}
 	return result
 }
@@ -109,6 +113,40 @@ func (this chunkSource) ToChan() chan interface{} {
 	}()
 	return out
 
+}
+
+type keyValue struct {
+	key   interface{}
+	value interface{}
+}
+
+type MapSource struct {
+	data map[interface{}]interface{}
+}
+
+func (this MapSource) Typ() int {
+	return SOURCE_MAP
+}
+
+func (this MapSource) ToSlice() []interface{} {
+	i := 0
+	results := make([]interface{}, len(this.data), len(this.data))
+	for k, v := range this.data {
+		results[i] = &keyValue{k, v}
+		i++
+	}
+	return results
+}
+
+func (this MapSource) ToChan() chan interface{} {
+	out := make(chan interface{})
+	go func() {
+		for k, v := range this.data {
+			out <- &keyValue{k, v}
+		}
+		close(out)
+	}()
+	return out
 }
 
 //the queryable struct-------------------------------------------------------------------------
@@ -137,12 +175,16 @@ func From(src interface{}) (q Queryable) {
 	return
 }
 
-func (this Queryable) Results() []interface{} {
+func (this Queryable) get() source {
 	data := this.data
 	for _, step := range this.steps {
 		data, _ = step.stepAction()(data)
 	}
-	return data.ToSlice()
+	return data
+}
+
+func (this Queryable) Results() []interface{} {
+	return this.get().ToSlice()
 }
 
 func (this Queryable) Where(sure func(interface{}) bool) Queryable {
@@ -155,6 +197,21 @@ func (this Queryable) Select(selectFunc func(interface{}) interface{}) Queryable
 	return this
 }
 
+func (this Queryable) Distinct(distinctFunc func(interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, step{ACT_DISTINCT, distinctFunc, numCPU})
+	return this
+}
+
+func (this Queryable) Order(compare func(interface{}, interface{}) int) Queryable {
+	this.steps = append(this.steps, step{ACT_ORDERBY, compare, numCPU})
+	return this
+}
+
+func (this Queryable) GroupBy(keySelector func(interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, step{ACT_GROUPBY, keySelector, numCPU})
+	return this
+}
+
 //the struct and functions of step-------------------------------------------------------------------------
 type step struct {
 	typ    int
@@ -164,12 +221,33 @@ type step struct {
 
 type stepAction func(source) (source, error)
 
+const (
+	ACT_SELECT int = iota
+	ACT_WHERE
+	ACT_GROUPBY
+	ACT_ORDERBY
+	ACT_DISTINCT
+	ACT_JOIN
+)
+
 func (this step) stepAction() (act stepAction) {
 	switch this.typ {
 	case ACT_SELECT:
 		act = getSelect(this.act.(func(interface{}) interface{}), this.degree)
 	case ACT_WHERE:
 		act = getWhere(this.act.(func(interface{}) bool), this.degree)
+	case ACT_DISTINCT:
+		act = getDistinct(this.act.(func(interface{}) interface{}), this.degree)
+	case ACT_ORDERBY:
+		act = getOrder(this.act.(func(interface{}, interface{}) int))
+	case ACT_GROUPBY:
+		act = getGroupBy(this.act.(func(interface{}) interface{}), this.degree)
+		//func getJoin(inner interface{},
+		//	outerKeySelector func(interface{}) interface{},
+		//	innerKeySelector func(interface{}) interface{},
+		//	resultSelector func(interface{}, interface{}) interface{}, degree int) stepAction {
+	case ACT_JOIN:
+		act = getJoin(this.act.(func(interface{}) interface{}), this.degree)
 	}
 	return
 }
@@ -188,8 +266,8 @@ func getWhere(sure func(interface{}) bool, degree int) stepAction {
 		case *chunkSource:
 			out := make(chan *chunk)
 
-			f1 := makeChanTasks(s, out, func(c *chunk) *chunk {
-				return forChunk(c, whereAction(sure))
+			f1 := makeChanTasks(s, func(c *chunk) {
+				out <- forChunk(c, whereAction(sure))
 			}, degree)
 
 			f = makeSummaryTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
@@ -214,19 +292,19 @@ func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction 
 			f = makeBlockTasks(s, func(c *chunk) []interface{} {
 				out := results[c.order : c.order+len(c.data)]
 				forSlice2(c.data, selectAction(selectFunc), &out)
-				//fmt.Println("(out)=", (out))
 				return nil
 			}, degree)
-			return sourceFromFuture(f, func(results []interface{}) source {
+			return sourceFromFuture(f, func(r []interface{}) source {
+				//fmt.Println("results=", results)
 				return &blockSource{results}
 			})
 		case *chunkSource:
 			out := make(chan *chunk)
 
-			_ = makeChanTasks(s, out, func(c *chunk) *chunk {
+			_ = makeChanTasks(s, func(c *chunk) {
 				result := make([]interface{}, 0, len(c.data)) //c.end-c.start+2)
 				forSlice2(c.data, selectAction(selectFunc), &result)
-				return &chunk{result, c.order}
+				out <- &chunk{result, c.order}
 			}, degree)
 
 			//todo: how to handle error in promise?
@@ -236,6 +314,248 @@ func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction 
 		panic(ErrUnsupportSource)
 	})
 
+}
+
+type sortable struct {
+	values []interface{}
+	less   func(this, that interface{}) bool
+}
+
+func (q sortable) Len() int           { return len(q.values) }
+func (q sortable) Swap(i, j int)      { q.values[i], q.values[j] = q.values[j], q.values[i] }
+func (q sortable) Less(i, j int) bool { return q.less(q.values[i], q.values[j]) }
+
+func getOrder(compare func(interface{}, interface{}) int) stepAction {
+	return stepAction(func(src source) (source, error) {
+		switch s := src.(type) {
+		case *blockSource:
+			sortable := sortable{}
+			sortable.less = func(this, that interface{}) bool {
+				return compare(this, that) == -1
+			}
+			sortable.values = make([]interface{}, len(s.data))
+			_ = copy(sortable.values, s.data)
+			sort.Sort(sortable)
+			return &blockSource{sortable.values}, nil
+		case *chunkSource:
+			avl := NewAvlTree(compare)
+			f := makeChanTasks(s, func(c *chunk) {
+				for _, v := range c.data {
+					avl.Insert(v)
+				}
+			}, 1)
+
+			return sourceFromFuture(f, func(r []interface{}) source {
+				return &blockSource{avl.ToSlice()}
+			})
+		}
+		return nil, nil
+	})
+}
+
+func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAction {
+	return stepAction(func(src source) (source, error) {
+		out := make(chan *chunk)
+
+		//get all values and keys
+		var f *promise.Future
+		switch s := src.(type) {
+		case *blockSource:
+			f = makeBlockTasks(s, func(c *chunk) (r []interface{}) {
+				out <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
+				return
+			}, degree)
+		case *chunkSource:
+			f = makeChanTasks(s, func(c *chunk) {
+				out <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
+			}, degree)
+		}
+
+		//get distinct values
+		distKvs := make(map[interface{}]interface{})
+	L1:
+		for {
+			select {
+			case <-f.GetChan():
+				break L1
+			case c := <-out:
+				for _, v := range c.data {
+					kv := v.(*keyValue)
+					if _, ok := distKvs[kv.key]; !ok {
+						distKvs[kv.key] = kv.value
+					}
+				}
+			}
+		}
+
+		//get distinct values
+		i := 0
+		results := make([]interface{}, len(distKvs), len(distKvs))
+		for _, v := range distKvs {
+			results[i] = v
+			i++
+		}
+		return &blockSource{results}, nil
+	})
+}
+
+func getGroupBy(groupFunc func(interface{}) interface{}, degree int) stepAction {
+	return stepAction(func(src source) (source, error) {
+		out := make(chan *chunk)
+
+		//get all values and keys
+		var f *promise.Future
+		switch s := src.(type) {
+		case *blockSource:
+			f = makeBlockTasks(s, func(c *chunk) (r []interface{}) {
+				out <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
+				return
+			}, degree)
+		case *chunkSource:
+			f = makeChanTasks(s, func(c *chunk) {
+				out <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
+			}, degree)
+		}
+
+		//get key with group values values
+		groupKvs := make(map[interface{}]interface{})
+	L1:
+		for {
+			select {
+			case <-f.GetChan():
+				break L1
+			case c := <-out:
+				for _, v := range c.data {
+					kv := v.(*keyValue)
+					if v, ok := groupKvs[kv.key]; !ok {
+						groupKvs[kv.key] = []interface{}{kv.value}
+					} else {
+						list := v.([]interface{})
+						groupKvs[kv.key] = append(list, kv.value)
+					}
+				}
+			}
+		}
+
+		return &MapSource{groupKvs}, nil
+	})
+}
+
+func getJoin(inner interface{},
+	outerKeySelector func(interface{}) interface{},
+	innerKeySelector func(interface{}) interface{},
+	resultSelector func(interface{}, interface{}) interface{}, degree int) stepAction {
+	return stepAction(func(src source) (source, error) {
+		innerKVtask := promise.Start(func() []interface{} {
+			innerKvs := From(inner).GroupBy(innerKeySelector).get().(MapSource).data
+			return []interface{}{innerKvs, true}
+		})
+		switch s := src.(type) {
+		case *blockSource:
+			outerKeySelectorFuture := makeBlockTasks(s, func(c *chunk) (r []interface{}) {
+				outerKvs := getKeyValues(c, outerKeySelector, nil)
+				results := make([]interface{}, 0, 10)
+
+				if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
+
+				} else {
+					innerKvs := r[0].(map[interface{}]interface{})
+
+					for _, o := range outerKvs {
+						outerkv := o.(*keyValue)
+						if innerList, ok := innerKvs[outerkv.key]; ok {
+							innerList1 := innerList.([]interface{})
+							for _, iv := range innerList1 {
+								results = append(results, resultSelector(outerkv.value, iv))
+							}
+
+						}
+					}
+				}
+				return results
+			}, degree)
+			return sourceFromFuture(outerKeySelectorFuture, func(results []interface{}) source {
+				result := expandSlice(results)
+				return &blockSource{result}
+			})
+		case *chunkSource:
+			_ = makeChanTasks(s, func(c *chunk) {
+				_ = getKeyValues(c, outerKeySelector, nil)
+			}, degree)
+
+		}
+
+		return nil, nil
+		//outerChan := make(chan *chunk)
+		//var outerKeySelectorFuture *promise.Future
+		//f := promise.WhenAll(promise.Start(func() []interface{} {
+		//	innerKvs := From(inner).GroupBy(innerKeySelector).Results()
+		//	return []interface{}{innerKvs, true}
+		//}), promise.Start(func() []interface{} {
+		//	//get all values and keys for outer
+		//	switch s := src.(type) {
+		//	case *blockSource:
+		//		outerKeySelectorFuture = makeBlockTasks(s, func(c *chunk) (r []interface{}) {
+		//			outerChan <- &chunk{getKeyValues(c, outerKeySelector, nil), c.order}
+		//			return
+		//		}, degree)
+		//	case *chunkSource:
+		//		outerKeySelectorFuture = makeChanTasks(s, func(c *chunk) {
+		//			outerChan <- &chunk{getKeyValues(c, outerKeySelector, nil), c.order}
+		//		}, degree)
+		//	}
+		//	//send stop flag when all outer be handled
+		//	outerKeySelectorFuture.Done(func(...interface{}) {
+		//		outerChan <- nil
+		//	})
+		//	return nil
+		//}))
+
+		//if rs, ok := f.Get(); ok != promise.RESULT_SUCCESS {
+		//	//todo:
+		//	return nil, nil
+		//} else {
+		//	innerKvs := rs[0].([]interface{})[0].([]interface{})
+		//	innerMap := make(map[interface{}]interface{}, len(innerKvs))
+		//	for _, ikv := range innerKvs {
+		//		kv := ikv.(*keyValue)
+		//		innerMap[kv.key] = kv.value
+		//	}
+
+		//	//send result to chan
+		//	resultChan := make(chan *chunk)
+		//	outerKvSource := &chunkSource{outerChan}
+		//	makeChanTasks(outerKvSource, func(c *chunk) {
+		//		results := make([]interface{}, 0, 10)
+		//		outerKvs := c.data
+		//		for _, o := range outerKvs {
+		//			outerkv := o.(*keyValue)
+		//			if ilist, ok := innerMap[outerkv.key]; ok {
+		//				if ilist1, ok1 := ilist.([]interface{}); ok1 {
+		//					for _, iv := range ilist1 {
+		//						results = append(results, resultSelector(outerkv.value, iv))
+		//					}
+		//				} else if iv, ok2 := ilist.(interface{}); ok2 {
+		//					results = append(results, resultSelector(outerkv.value, iv))
+		//				}
+		//			}
+		//		}
+		//	}, degree)
+		//	return &chunkSource{resultChan}, nil
+
+		//}
+	})
+}
+
+func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *[]interface{}) []interface{} {
+	if keyValues == nil {
+		list := (make([]interface{}, len(c.data), len(c.data)))
+		keyValues = &list
+	}
+	forSlice2(c.data, selectAction(func(v interface{}) interface{} {
+		return &keyValue{keyFunc(v), v}
+	}), keyValues)
+	return *keyValues
 }
 
 func sourceFromFuture(f *promise.Future, sourceFunc func([]interface{}) source) (source, error) {
@@ -259,12 +579,15 @@ func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interfa
 
 func selectAction(s func(interface{}) interface{}) func(v interface{}, out *[]interface{}, i int) {
 	return func(v interface{}, out *[]interface{}, i int) {
+		if i >= len(*out) {
+			fmt.Println("out of", i, len(*out))
+		}
 		(*out)[i] = s(v)
 	}
 }
 
 //util funcs------------------------------------------
-func makeChanTasks(src *chunkSource, out chan *chunk, task func(*chunk) *chunk, degree int) *promise.Future {
+func makeChanTasks(src *chunkSource, task func(*chunk), degree int) *promise.Future {
 	itr := src.Itr()
 	fs := make([]*promise.Future, degree, degree)
 	for i := 0; i < degree; i++ {
@@ -275,29 +598,13 @@ func makeChanTasks(src *chunkSource, out chan *chunk, task func(*chunk) *chunk, 
 						src.Close()
 						break
 					}
-					out <- task(c)
+					task(c)
 				} else {
 					break
 				}
 			}
 			return nil
 			//fmt.Println("r=", r)
-		})
-		fs[i] = f
-	}
-	f := promise.WhenAll(fs...)
-
-	return f
-}
-
-func makeChanTasks1(src *chunkSource, task func(func() (*chunk, bool)) []interface{}, degree int) *promise.Future {
-	itr := src.Itr()
-	fs := make([]*promise.Future, degree, degree)
-	for i := 0; i < degree; i++ {
-		f := promise.Start(func() []interface{} {
-			r := task(itr)
-			//fmt.Println("r=", r)
-			return r
 		})
 		fs[i] = f
 	}
@@ -318,6 +625,8 @@ func makeBlockTasks(src source, task func(*chunk) []interface{}, degree int) *pr
 			end = len
 		}
 		c := &chunk{data[i*size : end], i * size} //, end}
+		//fmt.Println("distinctFunc(v)", distinctFunc(v))
+
 		f := promise.Start(func() []interface{} {
 			r := task(c)
 			return r
@@ -403,7 +712,7 @@ func expandSlice(src []interface{}) []interface{} {
 
 func ceilSplitSize(a int, b int) int {
 	if a%b != 0 {
-		return (a + (b - (a % b))) / b
+		return a/b + 1
 	} else {
 		return a / b
 	}
@@ -412,6 +721,7 @@ func ceilSplitSize(a int, b int) int {
 //AVL----------------------------------------------------
 type avlNode struct {
 	data           interface{}
+	sameList       []interface{}
 	bf             int
 	lchild, rchild *avlNode
 }
@@ -467,7 +777,7 @@ func lBalance(root **avlNode) {
 func rBalance(root **avlNode) {
 	var rl *avlNode
 	r := (*root).rchild
-	fmt.Println("rBalance, r=", *r)
+	//fmt.Println("rBalance, r=", *r)
 	switch r.bf {
 	case RH:
 		(*root).bf = EH
@@ -495,22 +805,28 @@ func rBalance(root **avlNode) {
 
 func InsertAVL(root **avlNode, e interface{}, taller *bool, compare1 func(interface{}, interface{}) int) bool {
 	if *root == nil {
-		node := avlNode{e, EH, nil, nil}
+		node := avlNode{e, nil, EH, nil, nil}
 		*root = &node
 		*taller = true
-		fmt.Println("insert to node,node=", *root)
+		//fmt.Println("insert to node,node=", *root)
 	} else {
-		if e == (*root).data {
+		i := compare1(e, (*root).data)
+		if e == (*root).data || i == 0 {
+			if (*root).sameList == nil {
+				(*root).sameList = make([]interface{}, 0, 4)
+			}
+
+			(*root).sameList = append((*root).sameList, e)
 			return false
 		}
 
-		if compare1(e, (*root).data) == -1 {
+		if i == -1 {
 			//lchild := (avlTree)((*root).lchild)
-			fmt.Println("will insert to lchild,lchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
+			//fmt.Println("will insert to lchild,lchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
 			if !InsertAVL(&((*root).lchild), e, taller, compare1) {
 				return false
 			}
-			fmt.Println("insert to lchild,lchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
+			//fmt.Println("insert to lchild,lchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
 			if *taller {
 				switch (*root).bf {
 				case LH:
@@ -524,13 +840,13 @@ func InsertAVL(root **avlNode, e interface{}, taller *bool, compare1 func(interf
 					*taller = false
 				}
 			}
-		} else {
+		} else if i == 1 {
 			//rchild := (avlTree)((*root).rchild)
-			fmt.Println("will insert to rchild,rchild=", ((*root).rchild), " ,root=", *root, " ,e=", e)
+			//fmt.Println("will insert to rchild,rchild=", ((*root).rchild), " ,root=", *root, " ,e=", e)
 			if !InsertAVL(&((*root).rchild), e, taller, compare1) {
 				return false
 			}
-			fmt.Println("insert to rchild,rchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
+			//fmt.Println("insert to rchild,rchild=", ((*root).lchild), " ,root=", *root, " ,e=", e)
 			if *taller {
 				switch (*root).bf {
 				case RH:
@@ -549,6 +865,16 @@ func InsertAVL(root **avlNode, e interface{}, taller *bool, compare1 func(interf
 	return true
 }
 
+//func compareOriType(a interface{}, b interface{}) int {
+//	if a < b {
+//		return -1
+//	} else if a == b {
+//		return 0
+//	} else {
+//		return 1
+//	}
+//}
+
 type avlTree struct {
 	root    *avlNode
 	count   int
@@ -557,9 +883,9 @@ type avlTree struct {
 
 func (this *avlTree) Insert(node interface{}) {
 	var taller bool
-	if InsertAVL(&(this.root), node, &taller, this.compare) {
-		this.count++
-	}
+	InsertAVL(&(this.root), node, &taller, this.compare)
+	this.count++
+
 }
 
 func (this *avlTree) ToSlice() []interface{} {
@@ -568,10 +894,18 @@ func (this *avlTree) ToSlice() []interface{} {
 	return result
 }
 
+func NewAvlTree(compare func(a interface{}, b interface{}) int) *avlTree {
+	return &avlTree{nil, 0, compare}
+}
+
 func avlToSlice(root *avlNode, result *[]interface{}) []interface{} {
 	if result == nil {
 		r := make([]interface{}, 0, 10)
 		result = &r
+	}
+
+	if root == nil {
+		return *result
 	}
 
 	if (root).lchild != nil {
@@ -579,6 +913,11 @@ func avlToSlice(root *avlNode, result *[]interface{}) []interface{} {
 		avlToSlice(l, result)
 	}
 	*result = append(*result, root.data)
+	if root.sameList != nil {
+		for _, v := range root.sameList {
+			*result = append(*result, v)
+		}
+	}
 	if (root).rchild != nil {
 		r := (root.rchild)
 		avlToSlice(r, result)

@@ -114,6 +114,11 @@ func (this queryableS) Get() []interface{} {
 	return data
 }
 
+type power struct {
+	i int
+	p int
+}
+
 func main() {
 	time.Now()
 	count := 100
@@ -139,9 +144,13 @@ func main() {
 	//fmt.Println()
 
 	src1 := make([]interface{}, 0, 100)
+	pow1 := make(power, 0, 100)
 	//go func() {
 	for i := 0; i < count; i++ {
-		src1 = append(src1, i)
+		pow1 = append(pow1, power{i, i * i})
+	}
+	for i := 10; i < count-20; i++ {
+		pow1 = append(pow1, power{i, i * i})
 	}
 	//}()
 
@@ -169,7 +178,18 @@ func main() {
 	//	i := v.(int)
 	//	return i%2 == 0
 	//}).Results()
-	fmt.Println("dst", dst)
+	fmt.Println("where select get dst", dst)
+
+	dst = From(src1).GroupBy(func(v interface{}) interface{} {
+		return v.(int) / 10
+	}).Results()
+	for _, o := range dst {
+		kv := o.(*keyValue)
+		fmt.Println("group get k=", kv.key, ";v=", kv.value, " ")
+	}
+	fmt.Println("")
+
+	//dst = From(src1).
 
 	//chSrc := make(chan *chunk)
 	//go func() {
@@ -192,8 +212,8 @@ func main() {
 
 	//fmt.Println("s" + strconv.Itoa(100000))
 
-	a := []interface{}{3, 2, 1, 4, 5, 6, 7, 10, 9, 8}
-	avl := &avlTree{nil, 0, func(a interface{}, b interface{}) int {
+	a := []interface{}{3, 2, 1, 4, 5, 6, 7, 10, 9, 8, 7, 6}
+	avl := NewAvlTree(func(a interface{}, b interface{}) int {
 		a1, b1 := a.(int), b.(int)
 		if a1 < b1 {
 			return -1
@@ -202,26 +222,14 @@ func main() {
 		} else {
 			return 1
 		}
-	}}
-	//var taller bool
-	//var tree *avlNode
-	for i := 0; i < 10; i++ {
-		//InsertAVL(&tree, a[i], &taller, func(a interface{}, b interface{}) int {
-		//	a1, b1 := a.(int), b.(int)
-		//	if a1 < b1 {
-		//		return -1
-		//	} else if a1 == b1 {
-		//		return 0
-		//	} else {
-		//		return 1
-		//	}
-		//})
+	})
+	for i := 0; i < len(a); i++ {
 		avl.Insert(a[i])
-		//fmt.Println("root=", *tree)
 	}
 	//_ = taller
 	//result := make([]interface{}, 0, 10)
 	//avlToSlice(tree, &result)
 	result := avl.ToSlice()
 	fmt.Println("avl result=", result, "count=", avl.count)
+
 }
