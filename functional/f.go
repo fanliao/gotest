@@ -83,7 +83,7 @@ type queryableS struct {
 func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 	action := func(src []interface{}) []interface{} {
 		dst := make([]interface{}, 0, len(this.source))
-		forSlice(src, func(v interface{}, out *[]interface{}) {
+		mapSlice(src, func(v interface{}, out *[]interface{}) {
 			if sure(v) {
 				*out = append(*out, v)
 			}
@@ -97,7 +97,7 @@ func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 func (this queryableS) Select(f func(interface{}) interface{}) queryableS {
 	action := func(src []interface{}) []interface{} {
 		dst := make([]interface{}, 0, len(this.source))
-		forSlice(src, func(v interface{}, out *[]interface{}) {
+		mapSlice(src, func(v interface{}, out *[]interface{}) {
 			*out = append(*out, f(v))
 		}, &dst)
 		return dst
@@ -149,7 +149,7 @@ func main() {
 	for i := 0; i < count; i++ {
 		src1 = append(src1, i)
 	}
-	for i := 10; i < count-20; i++ {
+	for i := 10; i < count-30; i++ {
 		pow1 = append(pow1, power{i, i * i})
 		pow1 = append(pow1, power{i, i * 100})
 	}
@@ -201,24 +201,29 @@ func main() {
 	fmt.Println("with", pow1)
 	fmt.Println("join return", dst)
 
-	//chSrc := make(chan *chunk)
-	//go func() {
-	//	chSrc <- &chunk{src1, 0, 24}
-	//	chSrc <- &chunk{src1, 25, 49}
-	//	chSrc <- &chunk{src1, 50, 74}
-	//	chSrc <- &chunk{src1, 75, 99}
-	//	chSrc <- nil
-	//	fmt.Println("close src", chSrc)
-	//}()
+	chSrc := make(chan *chunk)
+	go func() {
+		chSrc <- &chunk{src1[0:25], 0}
+		chSrc <- &chunk{src1[25:50], 25}
+		chSrc <- &chunk{src1[50:75], 50}
+		chSrc <- &chunk{src1[75:100], 75}
+		chSrc <- nil
+		fmt.Println("close src", chSrc)
+	}()
 
-	////for v := range chSrc {
-	////	fmt.Println(v)
-	////}
+	//for v := range chSrc {
+	//	fmt.Println(v)
+	//}
 
-	//cs := chunkSource{chSrc, 2}
-	//dst = whereAct(cs)
-	//fmt.Println("dst of chunk", (dst.(blockSource)).data)
-	//fmt.Println("Hello World2")
+	dst = From(chSrc).Where(func(v interface{}) bool {
+		i := v.(int)
+		return i%2 == 0
+	}).Select(func(v interface{}) interface{} {
+		i := v.(int)
+		return "item" + strconv.Itoa(i)
+	}).KeepOrder(true).Results()
+	fmt.Println("dst of chunk", dst)
+	fmt.Println("Hello World2")
 
 	//fmt.Println("s" + strconv.Itoa(100000))
 
