@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	count         int = 10000
-	distinctcount int = 11000
+	count         int = 1000
+	distinctcount int = 1100
 	MAXPROCS      int = 4
 )
 
@@ -19,6 +19,8 @@ var (
 	arr             []interface{} = make([]interface{}, count, count)
 	arrUser         []interface{} = make([]interface{}, count, count)
 	arrRepeatedUser []interface{} = make([]interface{}, distinctcount, distinctcount)
+
+	arrRole []interface{} = make([]interface{}, count, count)
 )
 
 func init() {
@@ -32,11 +34,20 @@ func init() {
 	for i := 0; i < distinctcount-count; i++ {
 		arrRepeatedUser[count+i] = user{i, "user" + strconv.Itoa(count+i)}
 	}
+
+	for i := 0; i < count/2; i++ {
+		arrRole[i*2] = role{i, "role" + strconv.Itoa(i)}
+		arrRole[i*2+1] = role{i, "role" + strconv.Itoa(i+1)}
+	}
 }
 
 type user struct {
 	id   int
 	name string
+}
+type role struct {
+	uid  int
+	role string
 }
 
 func where1(v interface{}) bool {
@@ -187,31 +198,31 @@ func BenchmarkBlockSourceDistinct(b *testing.B) {
 	}
 }
 
-func BenchmarkGoLinqDistinct(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
-			v1, v2 := a.(user), b.(user)
-			return v1.id == v2.id, nil
-		}).Results()
-		if len(dst) != count {
-			b.Fail()
-			b.Error("size is ", len(dst))
-		}
-	}
-}
+//func BenchmarkGoLinqDistinct(b *testing.B) {
+//	for i := 0; i < b.N; i++ {
+//		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
+//			v1, v2 := a.(user), b.(user)
+//			return v1.id == v2.id, nil
+//		}).Results()
+//		if len(dst) != count {
+//			b.Fail()
+//			b.Error("size is ", len(dst))
+//		}
+//	}
+//}
 
-func BenchmarkGoLinqParallelDistinct(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
-			v1, v2 := a.(user), b.(user)
-			return v1.id == v2.id, nil
-		}).AsParallel().Results()
-		if len(dst) != count {
-			b.Fail()
-			b.Error("size is ", len(dst))
-		}
-	}
-}
+//func BenchmarkGoLinqParallelDistinct(b *testing.B) {
+//	for i := 0; i < b.N; i++ {
+//		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
+//			v1, v2 := a.(user), b.(user)
+//			return v1.id == v2.id, nil
+//		}).AsParallel().Results()
+//		if len(dst) != count {
+//			b.Fail()
+//			b.Error("size is ", len(dst))
+//		}
+//	}
+//}
 
 //test order-----------------------------------------------------------------------------
 func orderUser(v1 interface{}, v2 interface{}) int {
@@ -270,6 +281,64 @@ func BenchmarkGoLinqOrder(b *testing.B) {
 			//b.Log("arr=", arr)
 			b.Error("size is ", len(dst))
 			b.Log("dst=", dst)
+		}
+	}
+}
+
+//test join-----------------------------------------------------------------
+func userSelector(v interface{}) interface{} {
+	return v.(user).id
+}
+func roleSelector(v interface{}) interface{} {
+	r := v.(role)
+	return r.uid
+}
+func resultSelector(u interface{}, v interface{}) interface{} {
+	return strconv.Itoa(u.(user).id) + "-" + v.(role).role
+}
+
+func BenchmarkBlockSourceJoin(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst := From(arrUser).Join(arrRole, userSelector, roleSelector, resultSelector).Results()
+		if len(dst) != count {
+			b.Fail()
+			//b.Log("arr=", arr)
+			b.Error("size is ", len(dst))
+			b.Log("dst=", dst)
+		}
+	}
+}
+
+func BenchmarkGoLinqJoin(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).Join(arrRole, func(v linq.T) linq.T {
+			return v.(user).id
+		}, func(v linq.T) linq.T {
+			r := v.(role)
+			return r.uid
+		}, func(u linq.T, v linq.T) linq.T {
+			return strconv.Itoa(u.(user).id) + "-" + v.(role).role
+		}).Results()
+		if len(dst) != count {
+			b.Fail()
+			b.Error("size is ", len(dst))
+		}
+	}
+}
+
+func BenchmarkGoLinqParallelJoin(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).Join(arrRole, func(v linq.T) linq.T {
+			return v.(user).id
+		}, func(v linq.T) linq.T {
+			r := v.(role)
+			return r.uid
+		}, func(u linq.T, v linq.T) linq.T {
+			return strconv.Itoa(u.(user).id) + "-" + v.(role).role
+		}).AsParallel().Results()
+		if len(dst) != count {
+			b.Fail()
+			b.Error("size is ", len(dst))
 		}
 	}
 }

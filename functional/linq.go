@@ -188,38 +188,56 @@ func (this Queryable) Results() []interface{} {
 }
 
 func (this Queryable) Where(sure func(interface{}) bool) Queryable {
-	this.steps = append(this.steps, step{ACT_WHERE, sure, numCPU})
+	this.steps = append(this.steps, commonStep{ACT_WHERE, sure, numCPU})
 	return this
 }
 
 func (this Queryable) Select(selectFunc func(interface{}) interface{}) Queryable {
-	this.steps = append(this.steps, step{ACT_SELECT, selectFunc, numCPU})
+	this.steps = append(this.steps, commonStep{ACT_SELECT, selectFunc, numCPU})
 	return this
 }
 
 func (this Queryable) Distinct(distinctFunc func(interface{}) interface{}) Queryable {
-	this.steps = append(this.steps, step{ACT_DISTINCT, distinctFunc, numCPU})
+	this.steps = append(this.steps, commonStep{ACT_DISTINCT, distinctFunc, numCPU})
 	return this
 }
 
 func (this Queryable) Order(compare func(interface{}, interface{}) int) Queryable {
-	this.steps = append(this.steps, step{ACT_ORDERBY, compare, numCPU})
+	this.steps = append(this.steps, commonStep{ACT_ORDERBY, compare, numCPU})
 	return this
 }
 
 func (this Queryable) GroupBy(keySelector func(interface{}) interface{}) Queryable {
-	this.steps = append(this.steps, step{ACT_GROUPBY, keySelector, numCPU})
+	this.steps = append(this.steps, commonStep{ACT_GROUPBY, keySelector, numCPU})
+	return this
+}
+
+func (this Queryable) Join(inner interface{},
+	outerKeySelector func(interface{}) interface{},
+	innerKeySelector func(interface{}) interface{},
+	resultSelector func(interface{}, interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, joinStep{commonStep{ACT_JOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector})
 	return this
 }
 
 //the struct and functions of step-------------------------------------------------------------------------
-type step struct {
+type stepAction func(source) (source, error)
+type step interface {
+	stepAction() stepAction
+}
+
+type commonStep struct {
 	typ    int
 	act    interface{}
 	degree int
 }
 
-type stepAction func(source) (source, error)
+type joinStep struct {
+	commonStep
+	outerKeySelector func(interface{}) interface{}
+	innerKeySelector func(interface{}) interface{}
+	resultSelector   func(interface{}, interface{}) interface{}
+}
 
 const (
 	ACT_SELECT int = iota
@@ -230,7 +248,7 @@ const (
 	ACT_JOIN
 )
 
-func (this step) stepAction() (act stepAction) {
+func (this commonStep) stepAction() (act stepAction) {
 	switch this.typ {
 	case ACT_SELECT:
 		act = getSelect(this.act.(func(interface{}) interface{}), this.degree)
@@ -246,9 +264,12 @@ func (this step) stepAction() (act stepAction) {
 		//	outerKeySelector func(interface{}) interface{},
 		//	innerKeySelector func(interface{}) interface{},
 		//	resultSelector func(interface{}, interface{}) interface{}, degree int) stepAction {
-	case ACT_JOIN:
-		act = getJoin(this.act.(func(interface{}) interface{}), this.degree)
 	}
+	return
+}
+
+func (this joinStep) stepAction() (act stepAction) {
+	act = getJoin(this.act, this.outerKeySelector, this.innerKeySelector, this.resultSelector, this.degree)
 	return
 }
 
@@ -261,6 +282,7 @@ func getWhere(sure func(interface{}) bool, degree int) stepAction {
 			f = makeBlockTasks(s, func(c *chunk) []interface{} {
 				result := forChunk(c, whereAction(sure))
 				//fmt.Println("src=", c, "result=", result)
+
 				return []interface{}{result, true}
 			}, degree)
 		case *chunkSource:
@@ -447,7 +469,7 @@ func getJoin(inner interface{},
 	resultSelector func(interface{}, interface{}) interface{}, degree int) stepAction {
 	return stepAction(func(src source) (source, error) {
 		innerKVtask := promise.Start(func() []interface{} {
-			innerKvs := From(inner).GroupBy(innerKeySelector).get().(MapSource).data
+			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*MapSource).data
 			return []interface{}{innerKvs, true}
 		})
 		switch s := src.(type) {
@@ -457,6 +479,7 @@ func getJoin(inner interface{},
 				results := make([]interface{}, 0, 10)
 
 				if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
+					//todo:
 
 				} else {
 					innerKvs := r[0].(map[interface{}]interface{})
@@ -472,7 +495,7 @@ func getJoin(inner interface{},
 						}
 					}
 				}
-				return results
+				return []interface{}{&chunk{results, 1}, true}
 			}, degree)
 			return sourceFromFuture(outerKeySelectorFuture, func(results []interface{}) source {
 				result := expandSlice(results)
@@ -486,64 +509,6 @@ func getJoin(inner interface{},
 		}
 
 		return nil, nil
-		//outerChan := make(chan *chunk)
-		//var outerKeySelectorFuture *promise.Future
-		//f := promise.WhenAll(promise.Start(func() []interface{} {
-		//	innerKvs := From(inner).GroupBy(innerKeySelector).Results()
-		//	return []interface{}{innerKvs, true}
-		//}), promise.Start(func() []interface{} {
-		//	//get all values and keys for outer
-		//	switch s := src.(type) {
-		//	case *blockSource:
-		//		outerKeySelectorFuture = makeBlockTasks(s, func(c *chunk) (r []interface{}) {
-		//			outerChan <- &chunk{getKeyValues(c, outerKeySelector, nil), c.order}
-		//			return
-		//		}, degree)
-		//	case *chunkSource:
-		//		outerKeySelectorFuture = makeChanTasks(s, func(c *chunk) {
-		//			outerChan <- &chunk{getKeyValues(c, outerKeySelector, nil), c.order}
-		//		}, degree)
-		//	}
-		//	//send stop flag when all outer be handled
-		//	outerKeySelectorFuture.Done(func(...interface{}) {
-		//		outerChan <- nil
-		//	})
-		//	return nil
-		//}))
-
-		//if rs, ok := f.Get(); ok != promise.RESULT_SUCCESS {
-		//	//todo:
-		//	return nil, nil
-		//} else {
-		//	innerKvs := rs[0].([]interface{})[0].([]interface{})
-		//	innerMap := make(map[interface{}]interface{}, len(innerKvs))
-		//	for _, ikv := range innerKvs {
-		//		kv := ikv.(*keyValue)
-		//		innerMap[kv.key] = kv.value
-		//	}
-
-		//	//send result to chan
-		//	resultChan := make(chan *chunk)
-		//	outerKvSource := &chunkSource{outerChan}
-		//	makeChanTasks(outerKvSource, func(c *chunk) {
-		//		results := make([]interface{}, 0, 10)
-		//		outerKvs := c.data
-		//		for _, o := range outerKvs {
-		//			outerkv := o.(*keyValue)
-		//			if ilist, ok := innerMap[outerkv.key]; ok {
-		//				if ilist1, ok1 := ilist.([]interface{}); ok1 {
-		//					for _, iv := range ilist1 {
-		//						results = append(results, resultSelector(outerkv.value, iv))
-		//					}
-		//				} else if iv, ok2 := ilist.(interface{}); ok2 {
-		//					results = append(results, resultSelector(outerkv.value, iv))
-		//				}
-		//			}
-		//		}
-		//	}, degree)
-		//	return &chunkSource{resultChan}, nil
-
-		//}
 	})
 }
 
@@ -691,7 +656,6 @@ func expandSlice(src []interface{}) []interface{} {
 	chunks := make([]*chunk, len(src), len(src))
 	for i, c := range src {
 		chunks[i] = c.([]interface{})[0].(*chunk)
-		//fmt.Println("chunks[i]", i, "=", chunks[i])
 	}
 
 	count := 0

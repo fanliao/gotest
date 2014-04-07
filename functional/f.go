@@ -144,13 +144,14 @@ func main() {
 	//fmt.Println()
 
 	src1 := make([]interface{}, 0, 100)
-	pow1 := make(power, 0, 100)
+	pow1 := make([]interface{}, 0, 100)
 	//go func() {
 	for i := 0; i < count; i++ {
-		pow1 = append(pow1, power{i, i * i})
+		src1 = append(src1, i)
 	}
 	for i := 10; i < count-20; i++ {
 		pow1 = append(pow1, power{i, i * i})
+		pow1 = append(pow1, power{i, i * 100})
 	}
 	//}()
 
@@ -189,7 +190,16 @@ func main() {
 	}
 	fmt.Println("")
 
-	//dst = From(src1).
+	dst = From(src1).Join(pow1,
+		func(o interface{}) interface{} { return o },
+		func(i interface{}) interface{} { return i.(power).i },
+		func(o interface{}, i interface{}) interface{} {
+			o1, i1 := o.(int), i.(power)
+			return strconv.Itoa(o1) + ";" + strconv.Itoa(i1.p)
+		}).Results()
+	fmt.Println("join ", src1)
+	fmt.Println("with", pow1)
+	fmt.Println("join return", dst)
 
 	//chSrc := make(chan *chunk)
 	//go func() {
