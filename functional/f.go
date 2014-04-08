@@ -82,12 +82,13 @@ type queryableS struct {
 
 func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 	action := func(src []interface{}) []interface{} {
-		dst := make([]interface{}, 0, len(this.source))
-		mapSlice(src, func(v interface{}, out *[]interface{}) {
-			if sure(v) {
-				*out = append(*out, v)
-			}
-		}, &dst)
+		//dst := make([]interface{}, 0, len(this.source))
+		//mapSlice(src, func(v interface{}, out *[]interface{}) {
+		//	if sure(v) {
+		//		*out = append(*out, v)
+		//	}
+		//}, &dst)
+		dst := filterSlice(src, sure)
 		return dst
 	}
 	this.actions = append(this.actions, action)
@@ -96,10 +97,11 @@ func (this queryableS) Where(sure func(interface{}) bool) queryableS {
 
 func (this queryableS) Select(f func(interface{}) interface{}) queryableS {
 	action := func(src []interface{}) []interface{} {
-		dst := make([]interface{}, 0, len(this.source))
-		mapSlice(src, func(v interface{}, out *[]interface{}) {
-			*out = append(*out, f(v))
-		}, &dst)
+		//dst := make([]interface{}, 0, len(this.source))
+		//mapSlice(src, func(v interface{}, out *[]interface{}) {
+		//	*out = append(*out, f(v))
+		//}, &dst)
+		dst := mapSlice(src, f, nil)
 		return dst
 	}
 	this.actions = append(this.actions, action)
@@ -143,10 +145,12 @@ func main() {
 	//}
 	//fmt.Println()
 
+	arrInts := make([]int, 0, 100)
 	src1 := make([]interface{}, 0, 100)
 	pow1 := make([]interface{}, 0, 100)
 	//go func() {
 	for i := 0; i < count; i++ {
+		arrInts = append(arrInts, i)
 		src1 = append(src1, i)
 	}
 	for i := 10; i < count-30; i++ {
@@ -163,11 +167,6 @@ func main() {
 	}).Get()
 	fmt.Println("dst1", dst1)
 
-	//s := blockSource{src1, 2}
-	//whereAct := where(func(v interface{}) bool {
-	//	i := v.(int)
-	//	return i%2 == 0
-	//})
 	dst := From(src1).Where(func(v interface{}) bool {
 		i := v.(int)
 		return i%2 == 0
@@ -175,11 +174,16 @@ func main() {
 		i := v.(int)
 		return "item" + strconv.Itoa(i)
 	}).Results()
-	//dst := From(src1).Where(func(v interface{}) bool {
-	//	i := v.(int)
-	//	return i%2 == 0
-	//}).Results()
 	fmt.Println("where select get dst", dst)
+
+	dst = From(arrInts).Where(func(v interface{}) bool {
+		i := v.(int)
+		return i%2 == 0
+	}).Select(func(v interface{}) interface{} {
+		i := v.(int)
+		return "item" + strconv.Itoa(i)
+	}).Results()
+	fmt.Println("Int slice where select get dst", dst)
 
 	dst = From(src1).GroupBy(func(v interface{}) interface{} {
 		return v.(int) / 10

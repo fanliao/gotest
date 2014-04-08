@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	count         int = 1000
-	distinctcount int = 1100
+	count         int = 10000
+	distinctcount int = 11000
 	MAXPROCS      int = 4
 )
 
@@ -198,18 +198,18 @@ func BenchmarkBlockSourceDistinct(b *testing.B) {
 	}
 }
 
-//func BenchmarkGoLinqDistinct(b *testing.B) {
-//	for i := 0; i < b.N; i++ {
-//		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
-//			v1, v2 := a.(user), b.(user)
-//			return v1.id == v2.id, nil
-//		}).Results()
-//		if len(dst) != count {
-//			b.Fail()
-//			b.Error("size is ", len(dst))
-//		}
-//	}
-//}
+func BenchmarkGoLinqDistinct(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
+			v1, v2 := a.(user), b.(user)
+			return v1.id == v2.id, nil
+		}).Results()
+		if len(dst) != count {
+			b.Fail()
+			b.Error("size is ", len(dst))
+		}
+	}
+}
 
 //func BenchmarkGoLinqParallelDistinct(b *testing.B) {
 //	for i := 0; i < b.N; i++ {
