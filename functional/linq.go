@@ -12,7 +12,7 @@ import (
 
 var (
 	numCPU             int
-	ErrUnsupportSource = errors.New("unsupport source")
+	ErrUnsupportSource = errors.New("unsupport dataSource")
 )
 
 func init() {
@@ -20,7 +20,7 @@ func init() {
 	fmt.Println("go linq")
 }
 
-// the struct and interface about data source---------------------------------------------------
+// the struct and interface about data dataSource---------------------------------------------------
 type chunk struct {
 	data  []interface{}
 	order int
@@ -31,24 +31,23 @@ type chunk struct {
 const (
 	SOURCE_BLOCK int = iota
 	SOURCE_CHUNK
-	SOURCE_MAP
 )
 
-type source interface {
+type dataSource interface {
 	Typ() int //block or chan?
 	ToSlice() []interface{}
 	ToChan() chan interface{}
 }
 
-type blockSource struct {
+type listSource struct {
 	data interface{}
 }
 
-func (this blockSource) Typ() int {
+func (this listSource) Typ() int {
 	return SOURCE_BLOCK
 }
 
-func (this blockSource) ToSlice() []interface{} {
+func (this listSource) ToSlice() []interface{} {
 	switch data := this.data.(type) {
 	case []interface{}:
 		return data
@@ -84,7 +83,7 @@ func (this blockSource) ToSlice() []interface{} {
 	return nil
 }
 
-func (this blockSource) ToChan() chan interface{} {
+func (this listSource) ToChan() chan interface{} {
 	out := make(chan interface{})
 	go func() {
 		for _, v := range this.ToSlice() {
@@ -131,6 +130,12 @@ func (this chanSource) ToSlice() []interface{} {
 	for _, c := range chunks {
 		copy(result[start:start+len(c.data)], c.data)
 	}
+
+	//chunks := make([]interface{}, 0, 2)
+	//for c := range this.data {
+	//	chunks = appendSlice(chunks, c)
+	//}
+	//   expandChunks(chunks, )
 	return result
 }
 
@@ -154,7 +159,7 @@ type keyValue struct {
 
 //the queryable struct-------------------------------------------------------------------------
 type Queryable struct {
-	data      source
+	data      dataSource
 	steps     []step
 	keepOrder bool
 }
@@ -165,7 +170,7 @@ func From(src interface{}) (q Queryable) {
 	q.steps = make([]step, 0, 4)
 
 	if k := reflect.ValueOf(src).Kind(); k == reflect.Slice || k == reflect.Map {
-		q.data = &blockSource{data: src}
+		q.data = &listSource{data: src}
 	} else if s, ok := src.(chan *chunk); ok {
 		q.data = &chanSource{data: s}
 	} else {
@@ -182,7 +187,7 @@ func From(src interface{}) (q Queryable) {
 	return
 }
 
-func (this Queryable) get() source {
+func (this Queryable) get() dataSource {
 	data := this.data
 	for _, step := range this.steps {
 		data, this.keepOrder, _ = step.stepAction()(data, this.keepOrder)
@@ -233,7 +238,7 @@ func (this Queryable) KeepOrder(keep bool) Queryable {
 }
 
 //the struct and functions of step-------------------------------------------------------------------------
-type stepAction func(source, bool) (source, bool, error)
+type stepAction func(dataSource, bool) (dataSource, bool, error)
 type step interface {
 	stepAction() stepAction
 }
@@ -282,33 +287,37 @@ func (this joinStep) stepAction() (act stepAction) {
 }
 
 func getWhere(sure func(interface{}) bool, degree int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (dst source, keep bool, e error) {
+	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		var f *promise.Future
-
-		switch s := src.(type) {
-		case *blockSource:
-			f = makeBlockTasks(s, func(c *chunk) *chunk {
-				//result := mapChunk(c, whereAction(sure))
-				result := filterChunk(c, sure)
-				//fmt.Println("src=", c, "result=", result)
-				return result
-			}, degree)
-		case *chanSource:
-			out := make(chan *chunk)
-
-			f1 := makeChanTasks(s, func(c *chunk) {
-				//out <- mapChunk(c, whereAction(sure))
-				out <- filterChunk(c, sure)
-			}, degree)
-
-			f = makeReduceTask(f1.GetChan(), out, func(v interface{}, result *[]interface{}) {
-				*result = appendSlice(*result, v)
-			})
+		mapChunk := func(c *chunk) *chunk {
+			return filterChunk(c, sure)
+			//fmt.Println("src=", c, "result=", result)
 		}
 
-		dst, e = getSource(f, func(results []interface{}) source {
+		switch s := src.(type) {
+		case *listSource:
+			f = parallelMapList(s, mapChunk, degree)
+		case *chanSource:
+			reduceSrc := make(chan *chunk)
+
+			f = parallelMapChan(s, reduceSrc, mapChunk, degree)
+
+			results := make([]interface{}, 0, 1)
+			if keepOrder {
+				avl := newChunkAvlTree()
+				reduceChan(f.GetChan(), reduceSrc, func(v *chunk) { avl.Insert(v) })
+				results = avl.ToSlice()
+				keepOrder = false
+			} else {
+				reduceChan(f.GetChan(), reduceSrc, func(v *chunk) { results = appendSlice(results, v) })
+			}
+
+			f = promise.Wrap(results)
+		}
+
+		dst, e = getSource(f, func(results []interface{}) dataSource {
 			result := expandChunks(results, keepOrder)
-			return &blockSource{result}
+			return &listSource{result}
 		})
 		keep = keepOrder
 		return
@@ -316,31 +325,31 @@ func getWhere(sure func(interface{}) bool, degree int) stepAction {
 }
 
 func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (dst source, keep bool, e error) {
+	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		var f *promise.Future
 		keep = keepOrder
 
 		switch s := src.(type) {
-		case *blockSource:
+		case *listSource:
 			l := len(s.ToSlice())
 			results := make([]interface{}, l, l)
-			f = makeBlockTasks(s, func(c *chunk) *chunk {
+			f = parallelMapList(s, func(c *chunk) *chunk {
 				out := results[c.order : c.order+len(c.data)]
 				mapSlice(c.data, selectFunc, &out)
 				return nil
 			}, degree)
-			dst, e = getSource(f, func(r []interface{}) source {
+			dst, e = getSource(f, func(r []interface{}) dataSource {
 				//fmt.Println("results=", results)
-				return &blockSource{results}
+				return &listSource{results}
 			})
 			return
 		case *chanSource:
 			out := make(chan *chunk)
 
-			_ = makeChanTasks(s, func(c *chunk) {
+			_ = parallelMapChan(s, out, func(c *chunk) *chunk {
 				result := make([]interface{}, 0, len(c.data)) //c.end-c.start+2)
 				mapSlice(c.data, selectFunc, &result)
-				out <- &chunk{result, c.order}
+				return &chunk{result, c.order}
 			}, degree)
 
 			//todo: how to handle error in promise?
@@ -354,30 +363,24 @@ func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction 
 }
 
 func getOrder(compare func(interface{}, interface{}) int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (dst source, keep bool, e error) {
+	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		switch s := src.(type) {
-		case *blockSource:
+		case *listSource:
 			sorteds := sortSlice(s.ToSlice(), func(this, that interface{}) bool {
 				return compare(this, that) == -1
 			})
-			//sortable := sortable{}
-			//sortable.less = func(this, that interface{}) bool {
-			//	return compare(this, that) == -1
-			//}
-			//sortable.values = make([]interface{}, len(s.data))
-			//_ = copy(sortable.values, s.data)
-			//sort.Sort(sortable)
-			return &blockSource{sorteds}, true, nil
+			return &listSource{sorteds}, true, nil
 		case *chanSource:
 			avl := NewAvlTree(compare)
-			f := makeChanTasks(s, func(c *chunk) {
+			f := parallelMapChan(s, nil, func(c *chunk) *chunk {
 				for _, v := range c.data {
 					avl.Insert(v)
 				}
+				return nil
 			}, 1)
 
-			dst, e = getSource(f, func(r []interface{}) source {
-				return &blockSource{avl.ToSlice()}
+			dst, e = getSource(f, func(r []interface{}) dataSource {
+				return &listSource{avl.ToSlice()}
 			})
 			keep = true
 			return
@@ -387,91 +390,112 @@ func getOrder(compare func(interface{}, interface{}) int) stepAction {
 }
 
 func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (source, bool, error) {
-		out := make(chan *chunk)
+	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+		reduceSrc := make(chan *chunk)
+		mapChunk := func(c *chunk) (r *chunk) {
+			reduceSrc <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
+			return
+		}
 
 		//get all values and keys
 		var f *promise.Future
 		switch s := src.(type) {
-		case *blockSource:
-			f = makeBlockTasks(s, func(c *chunk) (r *chunk) {
-				out <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
-				return
-			}, degree)
+		case *listSource:
+			f = parallelMapList(s, mapChunk, degree)
 		case *chanSource:
-			f = makeChanTasks(s, func(c *chunk) {
-				out <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
-			}, degree)
+			f = parallelMapChan(s, nil, mapChunk, degree)
 		}
 
 		//get distinct values
 		distKvs := make(map[interface{}]int)
 		chunks := make([]interface{}, 0, degree)
-	L1:
-		for {
-			select {
-			case <-f.GetChan():
-				break L1
-			case c := <-out:
-				chunks = appendSlice(chunks, c)
-				result := make([]interface{}, 0, 2)
-				for _, v := range c.data {
-					kv := v.(*keyValue)
-					if _, ok := distKvs[kv.key]; !ok {
-						distKvs[kv.key] = 1
-						result = appendSlice(result, kv.value)
-					}
+		reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
+			chunks = appendSlice(chunks, c)
+			result := make([]interface{}, 0, 2)
+			for _, v := range c.data {
+				kv := v.(*keyValue)
+				if _, ok := distKvs[kv.key]; !ok {
+					distKvs[kv.key] = 1
+					result = appendSlice(result, kv.value)
 				}
-				c.data = result
 			}
-		}
+			c.data = result
+		})
+		//L1:
+		//	for {
+		//		select {
+		//		case <-f.GetChan():
+		//			break L1
+		//		case c := <-out:
+		//			chunks = appendSlice(chunks, c)
+		//			result := make([]interface{}, 0, 2)
+		//			for _, v := range c.data {
+		//				kv := v.(*keyValue)
+		//				if _, ok := distKvs[kv.key]; !ok {
+		//					distKvs[kv.key] = 1
+		//					result = appendSlice(result, kv.value)
+		//				}
+		//			}
+		//			c.data = result
+		//		}
+		//	}
 
 		//get distinct values
 		result := expandChunks(chunks, keepOrder)
-		return &blockSource{result}, keepOrder, nil
+		return &listSource{result}, keepOrder, nil
 	})
 }
 
 //note the groupby cannot keep order because the map cannot keep order
 func getGroupBy(groupFunc func(interface{}) interface{}, degree int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (source, bool, error) {
-		out := make(chan *chunk)
+	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+		reduceSrc := make(chan *chunk)
+		mapChunk := func(c *chunk) (r *chunk) {
+			reduceSrc <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
+			return
+		}
 
 		//get all values and keys
 		var f *promise.Future
 		switch s := src.(type) {
-		case *blockSource:
-			f = makeBlockTasks(s, func(c *chunk) (r *chunk) {
-				out <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
-				return
-			}, degree)
+		case *listSource:
+			f = parallelMapList(s, mapChunk, degree)
 		case *chanSource:
-			f = makeChanTasks(s, func(c *chunk) {
-				out <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
-			}, degree)
+			f = parallelMapChan(s, nil, mapChunk, degree)
 		}
 
 		//get key with group values values
 		groupKvs := make(map[interface{}]interface{})
-	L1:
-		for {
-			select {
-			case <-f.GetChan():
-				break L1
-			case c := <-out:
-				for _, v := range c.data {
-					kv := v.(*keyValue)
-					if v, ok := groupKvs[kv.key]; !ok {
-						groupKvs[kv.key] = []interface{}{kv.value}
-					} else {
-						list := v.([]interface{})
-						groupKvs[kv.key] = appendSlice(list, kv.value)
-					}
+		reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
+			for _, v := range c.data {
+				kv := v.(*keyValue)
+				if v, ok := groupKvs[kv.key]; !ok {
+					groupKvs[kv.key] = []interface{}{kv.value}
+				} else {
+					list := v.([]interface{})
+					groupKvs[kv.key] = appendSlice(list, kv.value)
 				}
 			}
-		}
+		})
+		//L1:
+		//	for {
+		//		select {
+		//		case <-f.GetChan():
+		//			break L1
+		//		case c := <-out:
+		//			for _, v := range c.data {
+		//				kv := v.(*keyValue)
+		//				if v, ok := groupKvs[kv.key]; !ok {
+		//					groupKvs[kv.key] = []interface{}{kv.value}
+		//				} else {
+		//					list := v.([]interface{})
+		//					groupKvs[kv.key] = appendSlice(list, kv.value)
+		//				}
+		//			}
+		//		}
+		//	}
 
-		return &blockSource{groupKvs}, keepOrder, nil
+		return &listSource{groupKvs}, keepOrder, nil
 	})
 }
 
@@ -479,48 +503,51 @@ func getJoin(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, interface{}) interface{}, degree int) stepAction {
-	return stepAction(func(src source, keepOrder bool) (dst source, keep bool, e error) {
+	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
+		keep = keepOrder
 		innerKVtask := promise.Start(func() []interface{} {
-			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*blockSource).data
+			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*listSource).data
 			return []interface{}{innerKvs, true}
 		})
-		switch s := src.(type) {
-		case *blockSource:
-			outerKeySelectorFuture := makeBlockTasks(s, func(c *chunk) (r *chunk) {
-				outerKvs := getKeyValues(c, outerKeySelector, nil)
-				results := make([]interface{}, 0, 10)
 
-				if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
-					//todo:
+		mapChunk := func(c *chunk) (r *chunk) {
+			outerKvs := getKeyValues(c, outerKeySelector, nil)
+			results := make([]interface{}, 0, 10)
 
-				} else {
-					innerKvs := r[0].(map[interface{}]interface{})
+			if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
+				//todo:
 
-					for _, o := range outerKvs {
-						outerkv := o.(*keyValue)
-						if innerList, ok := innerKvs[outerkv.key]; ok {
-							innerList1 := innerList.([]interface{})
-							for _, iv := range innerList1 {
-								results = appendSlice(results, resultSelector(outerkv.value, iv))
-							}
+			} else {
+				innerKvs := r[0].(map[interface{}]interface{})
 
+				for _, o := range outerKvs {
+					outerkv := o.(*keyValue)
+					if innerList, ok := innerKvs[outerkv.key]; ok {
+						innerList1 := innerList.([]interface{})
+						for _, iv := range innerList1 {
+							results = appendSlice(results, resultSelector(outerkv.value, iv))
 						}
+
 					}
 				}
+			}
 
-				return &chunk{results, c.order}
-			}, degree)
-			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) source {
+			return &chunk{results, c.order}
+		}
+
+		switch s := src.(type) {
+		case *listSource:
+			outerKeySelectorFuture := parallelMapList(s, mapChunk, degree)
+			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) dataSource {
 				result := expandChunks(results, keepOrder)
-				return &blockSource{result}
+				return &listSource{result}
 			})
-			keep = keepOrder
 			return
 		case *chanSource:
-			_ = makeChanTasks(s, func(c *chunk) {
-				_ = getKeyValues(c, outerKeySelector, nil)
-			}, degree)
-
+			out := make(chan *chunk)
+			_ = parallelMapChan(s, nil, mapChunk, degree)
+			dst, e = &chanSource{out}, nil
+			return
 		}
 
 		return nil, keep, nil
@@ -538,26 +565,8 @@ func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *
 	return *keyValues
 }
 
-//actions---------------------------------------------
-//func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interface{}) {
-//	return func(v interface{}, out *[]interface{}) {
-//		if sure(v) {
-//			*out = append(*out, v)
-//		}
-//	}
-//}
-
-//func selectAction(s func(interface{}) interface{}) func(v interface{}, out *[]interface{}, i int) {
-//	return func(v interface{}, out *[]interface{}, i int) {
-//		if i >= len(*out) {
-//			fmt.Println("out of", i, len(*out))
-//		}
-//		(*out)[i] = s(v)
-//	}
-//}
-
 //util funcs------------------------------------------
-func makeChanTasks(src *chanSource, task func(*chunk), degree int) *promise.Future {
+func parallelMapChan(src *chanSource, out chan *chunk, task func(*chunk) *chunk, degree int) *promise.Future {
 	itr := src.Itr()
 	fs := make([]*promise.Future, degree, degree)
 	for i := 0; i < degree; i++ {
@@ -568,7 +577,10 @@ func makeChanTasks(src *chanSource, task func(*chunk), degree int) *promise.Futu
 						src.Close()
 						break
 					}
-					task(c)
+					d := task(c)
+					if out != nil {
+						out <- d
+					}
 				} else {
 					break
 				}
@@ -583,7 +595,7 @@ func makeChanTasks(src *chanSource, task func(*chunk), degree int) *promise.Futu
 	return f
 }
 
-func makeBlockTasks(src source, task func(*chunk) *chunk, degree int) *promise.Future {
+func parallelMapList(src dataSource, task func(*chunk) *chunk, degree int) *promise.Future {
 	fs := make([]*promise.Future, degree, degree)
 	data := src.ToSlice()
 	len := len(data)
@@ -608,36 +620,24 @@ func makeBlockTasks(src source, task func(*chunk) *chunk, degree int) *promise.F
 	return f
 }
 
-func makeReduceTask(chEndFlag chan *promise.PromiseResult, out chan *chunk,
-	summary func(interface{}, *[]interface{}),
-) *promise.Future {
-	f := promise.Start(func() []interface{} {
-		//todo
-		result := make([]interface{}, 0, 4)
-		for {
-			select {
-			case <-chEndFlag:
-				return result
-			case v, _ := <-out:
-				//todo
-				//need improve the append()
-				summary(v, &result)
-			}
+func reduceChan(chEndFlag chan *promise.PromiseResult, src chan *chunk, reduce func(*chunk)) {
+	for {
+		select {
+		case <-chEndFlag:
+			return
+		case v, _ := <-src:
+			reduce(v)
 		}
-
-		return result
-	})
-
-	return f
+	}
 }
 
-func getSource(f *promise.Future, sourceFunc func([]interface{}) source) (source, error) {
+func getSource(f *promise.Future, dataSourceFunc func([]interface{}) dataSource) (dataSource, error) {
 	if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
 		//todo
 		return nil, nil
 	} else {
 		//fmt.Println("(results)=", (results))
-		return sourceFunc(results), nil
+		return dataSourceFunc(results), nil
 	}
 }
 
@@ -694,6 +694,7 @@ func expandChunks(src []interface{}, keepOrder bool) []interface{} {
 		})
 	}
 
+	count := 0
 	chunks := make([]*chunk, len(src), len(src))
 	for i, c := range src {
 		switch v := c.(type) {
@@ -702,12 +703,7 @@ func expandChunks(src []interface{}, keepOrder bool) []interface{} {
 		case *chunk:
 			chunks[i] = v
 		}
-		//fmt.Println("keepOrder", keepOrder, chunks[i].order)
-	}
-
-	count := 0
-	for _, c := range chunks {
-		count += len(c.data)
+		count += len(chunks[i].data)
 	}
 
 	//fmt.Println("count", count)
@@ -771,6 +767,19 @@ func sortSlice(data []interface{}, less func(interface{}, interface{}) bool) []i
 	_ = copy(sortable.values, data)
 	sort.Sort(sortable)
 	return sortable.values
+}
+
+func newChunkAvlTree() *avlTree {
+	return NewAvlTree(func(a interface{}, b interface{}) int {
+		c1, c2 := a.(*chunk), b.(*chunk)
+		if c1.order < c2.order {
+			return -1
+		} else if c1.order == c2.order {
+			return 0
+		} else {
+			return 1
+		}
+	})
 }
 
 //AVL----------------------------------------------------
