@@ -546,16 +546,6 @@ func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *
 	return *keyValues
 }
 
-func sourceFromFuture(f *promise.Future, sourceFunc func([]interface{}) source) (source, error) {
-	if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
-		//todo
-		return nil, nil
-	} else {
-		//fmt.Println("(results)=", (results))
-		return sourceFunc(results), nil
-	}
-}
-
 //actions---------------------------------------------
 func whereAction(sure func(interface{}) bool) func(v interface{}, out *[]interface{}) {
 	return func(v interface{}, out *[]interface{}) {
@@ -648,6 +638,16 @@ func makeReduceTask(chEndFlag chan *promise.PromiseResult, out chan *chunk,
 	})
 
 	return f
+}
+
+func sourceFromFuture(f *promise.Future, sourceFunc func([]interface{}) source) (source, error) {
+	if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
+		//todo
+		return nil, nil
+	} else {
+		//fmt.Println("(results)=", (results))
+		return sourceFunc(results), nil
+	}
 }
 
 func mapChunk(c *chunk, f func(interface{}, *[]interface{})) *chunk {
