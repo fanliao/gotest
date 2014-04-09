@@ -226,7 +226,31 @@ func (this Queryable) Join(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, interface{}) interface{}) Queryable {
-	this.steps = append(this.steps, joinStep{commonStep{ACT_JOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector})
+	this.steps = append(this.steps, joinStep{commonStep{ACT_JOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector, false})
+	return this
+}
+
+func (this Queryable) LeftJoin(inner interface{},
+	outerKeySelector func(interface{}) interface{},
+	innerKeySelector func(interface{}) interface{},
+	resultSelector func(interface{}, interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, joinStep{commonStep{ACT_JOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector, true})
+	return this
+}
+
+func (this Queryable) GroupJoin(inner interface{},
+	outerKeySelector func(interface{}) interface{},
+	innerKeySelector func(interface{}) interface{},
+	resultSelector func(interface{}, []interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, joinStep{commonStep{ACT_GROUPJOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector, false})
+	return this
+}
+
+func (this Queryable) LeftGroupJoin(inner interface{},
+	outerKeySelector func(interface{}) interface{},
+	innerKeySelector func(interface{}) interface{},
+	resultSelector func(interface{}, []interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, joinStep{commonStep{ACT_GROUPJOIN, inner, numCPU}, outerKeySelector, innerKeySelector, resultSelector, true})
 	return this
 }
 
@@ -251,7 +275,8 @@ type joinStep struct {
 	commonStep
 	outerKeySelector func(interface{}) interface{}
 	innerKeySelector func(interface{}) interface{}
-	resultSelector   func(interface{}, interface{}) interface{}
+	resultSelector   interface{}
+	isLeftJoin       bool
 }
 
 const (
@@ -261,6 +286,7 @@ const (
 	ACT_ORDERBY
 	ACT_DISTINCT
 	ACT_JOIN
+	ACT_GROUPJOIN
 )
 
 func (this commonStep) stepAction() (act stepAction) {
@@ -280,7 +306,14 @@ func (this commonStep) stepAction() (act stepAction) {
 }
 
 func (this joinStep) stepAction() (act stepAction) {
-	act = getJoin(this.act, this.outerKeySelector, this.innerKeySelector, this.resultSelector, false, this.degree)
+	switch this.typ {
+	case ACT_JOIN:
+		act = getJoin(this.act, this.outerKeySelector, this.innerKeySelector,
+			this.resultSelector.(func(interface{}, interface{}) interface{}), this.isLeftJoin, this.degree)
+	case ACT_GROUPJOIN:
+		act = getGroupJoin(this.act, this.outerKeySelector, this.innerKeySelector,
+			this.resultSelector.(func(interface{}, []interface{}) interface{}), this.isLeftJoin, this.degree)
+	}
 	return
 }
 
@@ -466,115 +499,33 @@ func getJoin(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
-	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
-		keep = keepOrder
-		innerKVtask := promise.Start(func() []interface{} {
-			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*listSource).data
-			return []interface{}{innerKvs, true}
-		})
-
-		mapChunk := func(c *chunk) (r *chunk) {
-			outerKvs := getKeyValues(c, outerKeySelector, nil)
-			results := make([]interface{}, 0, 10)
-
-			if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
-				//todo:
-
-			} else {
-				innerKvs := r[0].(map[interface{}]interface{})
-
-				for _, o := range outerKvs {
-					outerkv := o.(*keyValue)
-					if innerList, ok := innerKvs[outerkv.key]; ok {
-						innerList1 := innerList.([]interface{})
-						for _, iv := range innerList1 {
-							results = appendSlice(results, resultSelector(outerkv.value, iv))
-						}
-					} else if isLeftJoin {
-						results = appendSlice(results, resultSelector(outerkv.value, nil))
-					}
-				}
+	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
+		func(outerkv *keyValue, innerList []interface{}, results *[]interface{}) {
+			for _, iv := range innerList {
+				*results = appendSlice(*results, resultSelector(outerkv.value, iv))
 			}
-
-			return &chunk{results, c.order}
-		}
-
-		switch s := src.(type) {
-		case *listSource:
-			outerKeySelectorFuture := parallelMapList(s, mapChunk, degree)
-			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) dataSource {
-				result := expandChunks(results, false)
-				return &listSource{result}
-			})
-			return
-		case *chanSource:
-			out := make(chan *chunk)
-			_ = parallelMapChan(s, nil, mapChunk, degree)
-			dst, e = &chanSource{out}, nil
-			return
-		}
-
-		return nil, keep, nil
-	})
+		}, func(outerkv *keyValue, results *[]interface{}) {
+			*results = appendSlice(*results, resultSelector(outerkv.value, nil))
+		}, isLeftJoin, degree)
 }
 
 func getGroupJoin(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, []interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
-	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
-		keep = keepOrder
-		innerKVtask := promise.Start(func() []interface{} {
-			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*listSource).data
-			return []interface{}{innerKvs, true}
-		})
-
-		mapChunk := func(c *chunk) (r *chunk) {
-			outerKvs := getKeyValues(c, outerKeySelector, nil)
-			results := make([]interface{}, 0, 10)
-
-			if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
-				//todo:
-
-			} else {
-				innerKvs := r[0].(map[interface{}]interface{})
-
-				for _, o := range outerKvs {
-					outerkv := o.(*keyValue)
-					if innerList, ok := innerKvs[outerkv.key]; ok {
-						results = appendSlice(results, resultSelector(outerkv.value, innerList.([]interface{})))
-					} else if isLeftJoin {
-						results = appendSlice(results, resultSelector(outerkv.value, nil))
-					}
-				}
-			}
-
-			return &chunk{results, c.order}
-		}
-
-		switch s := src.(type) {
-		case *listSource:
-			outerKeySelectorFuture := parallelMapList(s, mapChunk, degree)
-			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) dataSource {
-				result := expandChunks(results, false)
-				return &listSource{result}
-			})
-			return
-		case *chanSource:
-			out := make(chan *chunk)
-			_ = parallelMapChan(s, nil, mapChunk, degree)
-			dst, e = &chanSource{out}, nil
-			return
-		}
-
-		return nil, keep, nil
-	})
+	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
+		func(outerkv *keyValue, innerList []interface{}, results *[]interface{}) {
+			*results = appendSlice(*results, resultSelector(outerkv.value, innerList))
+		}, func(outerkv *keyValue, results *[]interface{}) {
+			*results = appendSlice(*results, resultSelector(outerkv.value, []interface{}{}))
+		}, isLeftJoin, degree)
 }
 
-func getJoin(inner interface{},
+func getJoinImpl(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
-	resultSelector func(interface{}, interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
+	matchSelector func(*keyValue, []interface{}, *[]interface{}),
+	unmatchSelector func(*keyValue, *[]interface{}), isLeftJoin bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		keep = keepOrder
 		innerKVtask := promise.Start(func() []interface{} {
@@ -583,6 +534,11 @@ func getJoin(inner interface{},
 		})
 
 		mapChunk := func(c *chunk) (r *chunk) {
+			defer func() {
+				if e := recover(); e != nil {
+					fmt.Println(e)
+				}
+			}()
 			outerKvs := getKeyValues(c, outerKeySelector, nil)
 			results := make([]interface{}, 0, 10)
 
@@ -595,12 +551,14 @@ func getJoin(inner interface{},
 				for _, o := range outerKvs {
 					outerkv := o.(*keyValue)
 					if innerList, ok := innerKvs[outerkv.key]; ok {
-						innerList1 := innerList.([]interface{})
-						for _, iv := range innerList1 {
-							results = appendSlice(results, resultSelector(outerkv.value, iv))
-						}
+						matchSelector(outerkv, innerList.([]interface{}), &results)
+						//innerList1 := innerList.([]interface{})
+						//for _, iv := range innerList1 {
+						//	results = appendSlice(results, resultSelector(outerkv.value, iv))
+						//}
 					} else if isLeftJoin {
-						results = appendSlice(results, resultSelector(outerkv.value, nil))
+						unmatchSelector(outerkv, &results)
+						//results = appendSlice(results, resultSelector(outerkv.value, nil))
 					}
 				}
 			}
@@ -627,15 +585,10 @@ func getJoin(inner interface{},
 	})
 }
 
-func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *[]interface{}) []interface{} {
-	if keyValues == nil {
-		list := (make([]interface{}, len(c.data), len(c.data)))
-		keyValues = &list
-	}
-	mapSlice(c.data, func(v interface{}) interface{} {
-		return &keyValue{keyFunc(v), v}
-	}, keyValues)
-	return *keyValues
+func getUnion(source2 interface{}, degree int) stepAction {
+	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+		return nil, keepOrder, nil
+	})
 }
 
 //util funcs------------------------------------------
@@ -822,6 +775,50 @@ func ceilSplitSize(a int, b int) int {
 		return a / b
 	}
 }
+
+func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *[]interface{}) []interface{} {
+	if keyValues == nil {
+		list := (make([]interface{}, len(c.data), len(c.data)))
+		keyValues = &list
+	}
+	mapSlice(c.data, func(v interface{}) interface{} {
+		return &keyValue{keyFunc(v), v}
+	}, keyValues)
+	return *keyValues
+}
+
+func BKDRHash(s string) uint {
+	var seed uint32 = 131
+	var hash uint32 = 0
+
+	cs := []int(s)
+	for _, c = range cs {
+		hash = hash*seed + c
+	}
+
+	return (hash & 0x7FFFFFFF)
+}
+
+//// AP Hash Function
+//unsigned int APHash(char *str)
+//{
+//    unsigned int hash = 0;
+//    int i;
+
+//    for (i=0; *str; i++)
+//    {
+//        if ((i & 1) == 0)
+//        {
+//            hash ^= ((hash << 7) ^ (*str++) ^ (hash >> 3));
+//        }
+//        else
+//        {
+//            hash ^= (~((hash << 11) ^ (*str++) ^ (hash >> 5)));
+//        }
+//    }
+
+//    return (hash & 0x7FFFFFFF);
+//}
 
 //sort util func-------------------------------------------------------------------------------------------
 type sortable struct {

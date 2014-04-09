@@ -515,21 +515,21 @@ func testMakeFunc() {
 	fmt.Printf("method.mtyp is %#v, %#v\n", *m.mtyp, *m.mtyp.string)
 	fmt.Printf("method.typ is %#v, %#v\n", *m.typ, *m.typ.string)
 
-	rm := reflect.TypeOf(obj).Method(0)
-	fmt.Println(rm.Func.Call([]reflect.Value{reflect.ValueOf(obj)}))
+	//rm := reflect.TypeOf(obj).Method(0)
+	//fmt.Println(rm.Func.Call([]reflect.Value{reflect.ValueOf(obj)}))
 
-	newTest := func(in []reflect.Value) []reflect.Value {
-		s := "ioc"
-		return []reflect.Value{reflect.ValueOf(s)}
-	}
-	iocFunc := reflect.MakeFunc(rm.Func.Type(), newTest)
-	fmt.Println(iocFunc, iocFunc.Call([]reflect.Value{reflect.ValueOf(obj)}))
-	rmf := rm.Func
-	mv := *(*MyValue)(unsafe.Pointer(&rmf))
-	fmt.Println(mv, *(*unsafe.Pointer)(mv.val))
-	mv.flag1 = mv.flag1 | flagAddr
-	rmf = *(*reflect.Value)(unsafe.Pointer(&mv))
-	rmf.Set(iocFunc)
+	//newTest := func(in []reflect.Value) []reflect.Value {
+	//	s := "ioc"
+	//	return []reflect.Value{reflect.ValueOf(s)}
+	//}
+	//iocFunc := reflect.MakeFunc(rm.Func.Type(), newTest)
+	//fmt.Println(iocFunc, iocFunc.Call([]reflect.Value{reflect.ValueOf(obj)}))
+	//rmf := rm.Func
+	//mv := *(*MyValue)(unsafe.Pointer(&rmf))
+	//fmt.Println(mv, *(*unsafe.Pointer)(mv.val))
+	//mv.flag1 = mv.flag1 | flagAddr
+	//rmf = *(*reflect.Value)(unsafe.Pointer(&mv))
+	//rmf.Set(iocFunc)
 	//rm.Func.Set(fv)
 
 	//func (t *uncommonType) Method(i int) (m Method) {

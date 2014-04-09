@@ -21,7 +21,8 @@ func init() {
 		fmt.Println("本机器：大端")
 		bigEndian = true
 	} else {
-		fmt.Println("本机器：小端")
+		fmt.Println("本机器：小端你可好好 1v豹女    风格 发v  非常      没、")
+		fmt.Println("廖恩正是小。。。？廖恩正要洗澡澡拉！！！！！\n")
 		bigEndian = false
 	}
 

@@ -123,49 +123,21 @@ type power struct {
 
 func main() {
 	time.Now()
-	count := 100
-	//src := make(chan interface{}, 1)
-	//go func() {
-	//	for i := 0; i < count; i++ {
-	//		src <- i
-	//	}
-	//	close(src)
-	//}()
+	count := 20
 
-	//q := queryable{src, make([]func(chan interface{}) chan interface{}, 0, 1), nil}
-	//dst := q.Where(func(v interface{}) bool {
-	//	i := v.(int)
-	//	return i < 50
-	//}).Select(func(v interface{}) interface{} {
-	//	return v.(int) * 100
-	//}).Get()
-
-	//for v := range dst {
-	//	fmt.Print(v, " ")
-	//}
-	//fmt.Println()
-
-	arrInts := make([]int, 0, 100)
-	src1 := make([]interface{}, 0, 100)
-	pow1 := make([]interface{}, 0, 100)
+	arrInts := make([]int, 0, 20)
+	src1 := make([]interface{}, 0, 20)
+	pow1 := make([]interface{}, 0, 20)
 	//go func() {
 	for i := 0; i < count; i++ {
 		arrInts = append(arrInts, i)
 		src1 = append(src1, i)
 	}
-	for i := 10; i < count-30; i++ {
+	for i := count / 4; i < count/2; i++ {
 		pow1 = append(pow1, power{i, i * i})
 		pow1 = append(pow1, power{i, i * 100})
 	}
 	//}()
-
-	q1 := queryableS{src1, make([]func([]interface{}) []interface{}, 0, 1)}
-	dst1 := q1.Where(func(v interface{}) bool {
-		i := v.(int)
-		//time.Sleep(10 * time.Nanosecond)
-		return i < 54
-	}).Get()
-	fmt.Println("dst1", dst1)
 
 	dst := From(src1).Where(func(v interface{}) bool {
 		i := v.(int)
@@ -174,7 +146,7 @@ func main() {
 		i := v.(int)
 		return "item" + strconv.Itoa(i)
 	}).Results()
-	fmt.Println("where select get dst", dst)
+	fmt.Println("where select return", dst, "\n")
 
 	dst = From(arrInts).Where(func(v interface{}) bool {
 		i := v.(int)
@@ -183,7 +155,7 @@ func main() {
 		i := v.(int)
 		return "item" + strconv.Itoa(i)
 	}).Results()
-	fmt.Println("Int slice where select get dst", dst)
+	fmt.Println("Int slice where select return", dst, "\n")
 
 	dst = From(src1).GroupBy(func(v interface{}) interface{} {
 		return v.(int) / 10
@@ -194,23 +166,38 @@ func main() {
 	}
 	fmt.Println("")
 
-	dst = From(src1).Join(pow1,
+	dst = From(src1).LeftJoin(pow1,
 		func(o interface{}) interface{} { return o },
 		func(i interface{}) interface{} { return i.(power).i },
 		func(o interface{}, i interface{}) interface{} {
-			o1, i1 := o.(int), i.(power)
-			return strconv.Itoa(o1) + ";" + strconv.Itoa(i1.p)
+			if i == nil {
+				return strconv.Itoa(o.(int))
+			} else {
+				o1, i1 := o.(int), i.(power)
+				return strconv.Itoa(o1) + ";" + strconv.Itoa(i1.p)
+			}
 		}).Results()
 	fmt.Println("join ", src1)
 	fmt.Println("with", pow1)
-	fmt.Println("join return", dst)
+	fmt.Println("return", dst, "\n")
 
+	dst = From(src1).LeftGroupJoin(pow1,
+		func(o interface{}) interface{} { return o },
+		func(i interface{}) interface{} { return i.(power).i },
+		func(o interface{}, is []interface{}) interface{} {
+			return keyValue{o, is}
+		}).Results()
+	fmt.Println("groupjoin ", src1)
+	fmt.Println("with", pow1)
+	fmt.Println("return", dst, "\n")
+
+	size := count / 4
 	chSrc := make(chan *chunk)
 	go func() {
-		chSrc <- &chunk{src1[0:25], 0}
-		chSrc <- &chunk{src1[25:50], 25}
-		chSrc <- &chunk{src1[50:75], 50}
-		chSrc <- &chunk{src1[75:100], 75}
+		chSrc <- &chunk{src1[0:size], 0}
+		chSrc <- &chunk{src1[size : 2*size], size}
+		chSrc <- &chunk{src1[2*size : 3*size], 2 * size}
+		chSrc <- &chunk{src1[3*size : 4*size], 3 * size}
 		chSrc <- nil
 		fmt.Println("close src", chSrc)
 	}()
@@ -226,8 +213,8 @@ func main() {
 		i := v.(int)
 		return "item" + strconv.Itoa(i)
 	}).KeepOrder(true).Results()
-	fmt.Println("dst of chunk", dst)
-	fmt.Println("Hello World2")
+	fmt.Println("chansource where select return", dst)
+	fmt.Println()
 
 	//fmt.Println("s" + strconv.Itoa(100000))
 
