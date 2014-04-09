@@ -24,8 +24,6 @@ func init() {
 type chunk struct {
 	data  []interface{}
 	order int
-	//start int
-	//end   int
 }
 
 const (
@@ -35,7 +33,7 @@ const (
 
 type dataSource interface {
 	Typ() int //block or chan?
-	ToSlice() []interface{}
+	ToSlice(bool) []interface{}
 	ToChan() chan interface{}
 }
 
@@ -47,7 +45,7 @@ func (this listSource) Typ() int {
 	return SOURCE_BLOCK
 }
 
-func (this listSource) ToSlice() []interface{} {
+func (this listSource) ToSlice(keepOrder bool) []interface{} {
 	switch data := this.data.(type) {
 	case []interface{}:
 		return data
@@ -86,7 +84,7 @@ func (this listSource) ToSlice() []interface{} {
 func (this listSource) ToChan() chan interface{} {
 	out := make(chan interface{})
 	go func() {
-		for _, v := range this.ToSlice() {
+		for _, v := range this.ToSlice(true) {
 			out <- v
 		}
 		close(out)
@@ -114,29 +112,29 @@ func (this chanSource) Close() {
 	close(this.data)
 }
 
-func (this chanSource) ToSlice() []interface{} {
-	chunks := make([]*chunk, 0, 4)
-	for c := range this.data {
-		chunks = appendChunkSlice(chunks, c)
-	}
-
-	count := 0
-	for _, c := range chunks {
-		count = count + len(c.data)
-	}
-
-	result := make([]interface{}, 0, count)
-	start := 0
-	for _, c := range chunks {
-		copy(result[start:start+len(c.data)], c.data)
-	}
-
-	//chunks := make([]interface{}, 0, 2)
+func (this chanSource) ToSlice(keepOrder bool) []interface{} {
+	//chunks := make([]*chunk, 0, 4)
 	//for c := range this.data {
-	//	chunks = appendSlice(chunks, c)
+	//	chunks = appendChunkSlice(chunks, c)
 	//}
-	//   expandChunks(chunks, )
-	return result
+
+	//count := 0
+	//for _, c := range chunks {
+	//	count = count + len(c.data)
+	//}
+
+	//result := make([]interface{}, 0, count)
+	//start := 0
+	//for _, c := range chunks {
+	//	copy(result[start:start+len(c.data)], c.data)
+	//}
+	//return result
+
+	chunks := make([]interface{}, 0, 2)
+	for c := range this.data {
+		chunks = appendSlice(chunks, c)
+	}
+	return expandChunks(chunks, keepOrder)
 }
 
 func (this chanSource) ToChan() chan interface{} {
@@ -196,7 +194,7 @@ func (this Queryable) get() dataSource {
 }
 
 func (this Queryable) Results() []interface{} {
-	return this.get().ToSlice()
+	return this.get().ToSlice(this.keepOrder)
 }
 
 func (this Queryable) Where(sure func(interface{}) bool) Queryable {
@@ -316,7 +314,7 @@ func getWhere(sure func(interface{}) bool, degree int) stepAction {
 		}
 
 		dst, e = getSource(f, func(results []interface{}) dataSource {
-			result := expandChunks(results, keepOrder)
+			result := expandChunks(results, false)
 			return &listSource{result}
 		})
 		keep = keepOrder
@@ -331,7 +329,7 @@ func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction 
 
 		switch s := src.(type) {
 		case *listSource:
-			l := len(s.ToSlice())
+			l := len(s.ToSlice(false))
 			results := make([]interface{}, l, l)
 			f = parallelMapList(s, func(c *chunk) *chunk {
 				out := results[c.order : c.order+len(c.data)]
@@ -366,7 +364,7 @@ func getOrder(compare func(interface{}, interface{}) int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		switch s := src.(type) {
 		case *listSource:
-			sorteds := sortSlice(s.ToSlice(), func(this, that interface{}) bool {
+			sorteds := sortSlice(s.ToSlice(false), func(this, that interface{}) bool {
 				return compare(this, that) == -1
 			})
 			return &listSource{sorteds}, true, nil
@@ -421,27 +419,9 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 			}
 			c.data = result
 		})
-		//L1:
-		//	for {
-		//		select {
-		//		case <-f.GetChan():
-		//			break L1
-		//		case c := <-out:
-		//			chunks = appendSlice(chunks, c)
-		//			result := make([]interface{}, 0, 2)
-		//			for _, v := range c.data {
-		//				kv := v.(*keyValue)
-		//				if _, ok := distKvs[kv.key]; !ok {
-		//					distKvs[kv.key] = 1
-		//					result = appendSlice(result, kv.value)
-		//				}
-		//			}
-		//			c.data = result
-		//		}
-		//	}
 
 		//get distinct values
-		result := expandChunks(chunks, keepOrder)
+		result := expandChunks(chunks, false)
 		return &listSource{result}, keepOrder, nil
 	})
 }
@@ -477,23 +457,6 @@ func getGroupBy(groupFunc func(interface{}) interface{}, degree int) stepAction 
 				}
 			}
 		})
-		//L1:
-		//	for {
-		//		select {
-		//		case <-f.GetChan():
-		//			break L1
-		//		case c := <-out:
-		//			for _, v := range c.data {
-		//				kv := v.(*keyValue)
-		//				if v, ok := groupKvs[kv.key]; !ok {
-		//					groupKvs[kv.key] = []interface{}{kv.value}
-		//				} else {
-		//					list := v.([]interface{})
-		//					groupKvs[kv.key] = appendSlice(list, kv.value)
-		//				}
-		//			}
-		//		}
-		//	}
 
 		return &listSource{groupKvs}, keepOrder, nil
 	})
@@ -539,7 +502,7 @@ func getJoin(inner interface{},
 		case *listSource:
 			outerKeySelectorFuture := parallelMapList(s, mapChunk, degree)
 			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) dataSource {
-				result := expandChunks(results, keepOrder)
+				result := expandChunks(results, false)
 				return &listSource{result}
 			})
 			return
@@ -597,7 +560,7 @@ func parallelMapChan(src *chanSource, out chan *chunk, task func(*chunk) *chunk,
 
 func parallelMapList(src dataSource, task func(*chunk) *chunk, degree int) *promise.Future {
 	fs := make([]*promise.Future, degree, degree)
-	data := src.ToSlice()
+	data := src.ToSlice(false)
 	len := len(data)
 	size := ceilSplitSize(len, degree)
 	j := 0
