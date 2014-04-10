@@ -243,6 +243,24 @@ func main() {
 	result := avl.ToSlice()
 	fmt.Println("avl result=", result, "count=", avl.count)
 
-	//fmt.Print
+	testHash("user1" + strconv.Itoa(10))
+	testHash("user" + strconv.Itoa(110))
+	testHash("user" + strconv.Itoa(0))
+	testHash("user" + strconv.Itoa(0))
+	testHash(nil)
+	testHash(nil)
+	testHash(111.11)
+	testHash(111.11)
+	testHash([]int{1, 2, 0})
+	testHash([]int{1, 2, 0})
+	testHash(0)
+	testHash(0)
+	testHash([]interface{}{1, "user" + strconv.Itoa(2), 0})
+	testHash([]interface{}{1, "user" + strconv.Itoa(2), 0})
+	testHash(power{1, 1})
+	testHash(power{1, 1})
+}
 
+func testHash(data interface{}) {
+	fmt.Println("hash", data, tHash(data))
 }

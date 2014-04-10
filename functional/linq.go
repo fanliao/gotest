@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"sync"
 	"unsafe"
 )
 
@@ -605,51 +606,81 @@ func getJoinImpl(inner interface{},
 
 func getUnion(source2 interface{}, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
-		reduceSrc := make(chan *chunk)
-		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
-			return
-		}
+		////reduceSrc := make(chan *chunk)
+		//m := tMap{new(sync.Mutex), make(map[uint64]interface{})}
+		//mapChunk := func(c *chunk) (r *chunk) {
+		//	//reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+		//	for _, v := range c.data {
+		//		m.add(tHash(v), v)
+		//	}
+		//	return
+		//}
 
-		//get all values and keys
-		var f *promise.Future
-		switch s := src.(type) {
-		case *listSource:
-			f = parallelMapList(s, mapChunk, degree)
-		case *chanSource:
-			f = parallelMapChan(s, nil, mapChunk, degree)
-		}
+		////get all values and keys
+		//var f *promise.Future
+		//switch s := src.(type) {
+		//case *listSource:
+		//	f = parallelMapList(s, mapChunk, degree)
+		//case *chanSource:
+		//	f = parallelMapChan(s, nil, mapChunk, degree)
+		//}
 
-		dataSource2 := From(source2).data
-		var f1 *promise.Future
-		switch s := dataSource2.(type) {
-		case *listSource:
-			f1 = parallelMapList(s, mapChunk, degree)
-		case *chanSource:
-			f1 = parallelMapChan(s, nil, mapChunk, degree)
-		}
+		//dataSource2 := From(source2).data
+		//var f1 *promise.Future
+		//switch s := dataSource2.(type) {
+		//case *listSource:
+		//	f1 = parallelMapList(s, mapChunk, degree)
+		//case *chanSource:
+		//	f1 = parallelMapChan(s, nil, mapChunk, degree)
+		//}
 
-		f2 := promise.WhenAll(f, f1)
+		//f2 := promise.WhenAll(f, f1)
 
-		//get distinct values
-		distKvs := make(map[interface{}]int)
-		chunks := make([]interface{}, 0, degree)
-		reduceChan(f2.GetChan(), reduceSrc, func(c *chunk) {
-			chunks = appendSlice(chunks, c)
-			result := make([]interface{}, 0, 2)
-			for _, v := range c.data {
-				kv := v.(*KeyValue)
-				if _, ok := distKvs[kv.key]; !ok {
-					distKvs[kv.key] = 1
-					result = appendSlice(result, kv.value)
-				}
+		//////get distinct values
+		////distKvs := make(map[interface{}]bool)
+		////chunks := make([]interface{}, 0, 2*degree)
+		////reduceChan(f2.GetChan(), reduceSrc, func(c *chunk) {
+		////	chunks = appendSlice(chunks, c)
+		////	result := make([]interface{}, 0, len(c.data))
+		////	for _, v := range c.data {
+		////		kv := v.(*KeyValue)
+		////		if _, ok := distKvs[kv.key]; !ok {
+		////			distKvs[kv.key] = true
+		////			result = appendSlice(result, kv.value)
+		////		}
+		////	}
+		////	//fmt.Println("union", len(result))
+		////	c.data = result[0:len(result)]
+		////})
+
+		//////get distinct values
+		////result := expandChunks(chunks, false)
+		//_, _ = f2.Get()
+		//result := make([]interface{}, len(m.m))
+		//i := 0
+		//for k := range m.m {
+		//	result[i] = m.m[k]
+		//	i++
+		//}
+		//return &listSource{result}, keepOrder, nil
+
+		set := make(map[interface{}]bool)
+		for _, v := range src.ToSlice(false) {
+			if _, ok := set[v]; !ok {
+				set[v] = true
 			}
-			//fmt.Println("union", len(result), result)
-			c.data = result
-		})
-
-		//get distinct values
-		result := expandChunks(chunks, false)
+		}
+		for _, v := range From(source2).Results() {
+			if _, ok := set[v]; !ok {
+				set[v] = true
+			}
+		}
+		result := make([]interface{}, len(set))
+		i := 0
+		for k := range set {
+			result[i] = k
+			i++
+		}
 		return &listSource{result}, keepOrder, nil
 	})
 }
@@ -858,6 +889,12 @@ func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *
 }
 
 //hash an object-----------------------------------------------
+const (
+	ptrSize        = unsafe.Sizeof((*byte)(nil))
+	kindMask       = 0x7f
+	kindNoPointers = 0x80
+)
+
 // interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
 type interfaceHeader struct {
 	typ  *rtype
@@ -882,9 +919,24 @@ type rtype struct {
 	ptrToThis         *rtype         // type for pointer to this type, if used in binary or has methods
 }
 
-const ptrSize = unsafe.Sizeof((*byte)(nil))
+func (t *rtype) Kind() reflect.Kind { return reflect.Kind(t.kind & kindMask) }
 
-func dataPtr(data interface{}) (ptr unsafe.Pointer, size uintptr) {
+// structType represents a struct type.
+type structType struct {
+	rtype  `reflect:"struct"`
+	fields []structField // sorted by offset
+}
+
+// Struct field
+type structField struct {
+	name    *string // nil for embedded fields
+	pkgPath *string // nil for exported Names; otherwise import path
+	typ     *rtype  // type of field
+	tag     *string // nil if no tag
+	offset  uintptr // byte offset of field within struct
+}
+
+func dataPtr(data interface{}) (ptr unsafe.Pointer, typ *rtype) {
 	headerPtr := *((*interfaceHeader)(unsafe.Pointer(&data)))
 	//var dataPtr unsafe.Pointer
 	//if ptr.typ.kind == uint8(reflect.Ptr) {
@@ -892,8 +944,9 @@ func dataPtr(data interface{}) (ptr unsafe.Pointer, size uintptr) {
 	//	dataPtr = unsafe.Pointer(ptr.word)
 	//}
 
+	typ = headerPtr.typ
 	if headerPtr.typ != nil {
-		size = headerPtr.typ.size
+		size := headerPtr.typ.size
 		if size > ptrSize && headerPtr.word != 0 {
 			//如果是非指针类型并且数据size大于一个字，则interface的word是数据的地址
 			ptr = unsafe.Pointer(headerPtr.word)
@@ -905,41 +958,161 @@ func dataPtr(data interface{}) (ptr unsafe.Pointer, size uintptr) {
 	return
 }
 
-func BKDRHash(dataPtr unsafe.Pointer, size uintptr, data interface{}) uint32 {
-	var seed uint32 = 131
-	var hash uint32 = 0
-
-	//cs := []byte(s)
-	var i uintptr
-	//	for _, c := range cs {
-	logs := make([]interface{}, 0, 10)
-	logs = append(logs, data, "\n")
-	for i = 0; i < size; i++ {
-		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
-		hash = hash*seed + uint32(c)
-		logs = append(logs, i, c, hash, "\n")
+func hashByPtr(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
+	t := typ
+	if t == nil {
+		hashString("nil", hashObj)
+		hashValue(unsafe.Pointer(uintptr(0)), 0, hashObj)
+		return
 	}
 
-	fmt.Println(logs...)
-	return (hash & 0x7FFFFFFF)
+	hashString(*t.string, hashObj)
+	switch t.Kind() {
+	case reflect.String:
+		hashString(*((*string)(dataPtr)), hashObj)
+	case reflect.Struct:
+		hashStruct(dataPtr, t, hashObj)
+		//case reflect.Interface:
+		//case reflect.Slice:
+		//case reflect.Array:
+	default:
+		hashValue(dataPtr, typ.size, hashObj)
+	}
+
 }
 
-func DJBHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
-	var hash uint32 = 5381
+func hashString(s string, hashObj shash32) {
+	hashObj.Write([]byte(s))
+}
 
+func hashStruct(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
+	s := *((*structType)(unsafe.Pointer(typ)))
+
+	numField := len(s.fields)
+	for i := 0; i < numField; i++ {
+		fld := s.fields[i]
+		offset, fTyp := fld.offset, fld.typ
+		hashByPtr(unsafe.Pointer(uintptr(dataPtr)+offset), fTyp, hashObj)
+	}
+
+}
+
+func hashValue(dataPtr unsafe.Pointer, size uintptr, hashObj shash32) {
 	var i uintptr
+	//logs := make([]interface{}, 0, 10)
+	//logs = append(logs, data, "\n")
 	for i = 0; i < size; i++ {
 		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
-		hash = ((hash << 5) + hash) + uint32(c)
+		hashObj.WriteBype(c)
+		//logs = append(logs, i, c, hash, "\n")
 	}
-	return hash
+	//fmt.Println(logs...)
 }
+
+//func BKDRHashS(s string) uint32 {
+//	var seed uint32 = 131
+//	var hash uint32 = 0
+
+//	cs := []byte(s)
+//	for _, c := range cs {
+//		hash = hash*seed + uint32(c)
+//	}
+
+//	return (hash & 0x7FFFFFFF)
+//}
+
+//func DJBHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
+//	var hash uint32 = 5381
+
+//	var i uintptr
+//	for i = 0; i < size; i++ {
+//		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
+//		hash = ((hash << 5) + hash) + uint32(c)
+//	}
+//	return hash
+//}
 
 func tHash(data interface{}) uint64 {
 	dataPtr, size := dataPtr(data)
-	bkdr, djb := BKDRHash(dataPtr, size, data), DJBHash(dataPtr, size)
-	fmt.Println("hash", data, bkdr, djb, uint64(bkdr)<<32|uint64(djb), "\n")
-	return uint64(bkdr)<<32 | uint64(djb)
+	bkdr, djb := NewBKDR32(), NewDJB32()
+	hashByPtr(dataPtr, size, bkdr)
+	hashByPtr(dataPtr, size, djb)
+	//fmt.Println("hash", data, bkdr.Sum32(), djb.Sum32(), uint64(bkdr.Sum32())<<32|uint64(djb.Sum32()), "\n")
+	return uint64(bkdr.Sum32())<<32 | uint64(djb.Sum32())
+}
+
+const (
+	BKDR32seed   = 131
+	DJB32prime32 = 5381
+)
+
+// NewBKDR32 returns a new 32-bit BKDR hash
+func NewBKDR32() shash32 {
+	var s BKDR32 = 0
+	return &s
+}
+
+// NewBKDR32 returns a new 32-bit BKDR hash
+func NewDJB32() shash32 {
+	var s DJB32 = DJB32prime32
+	return &s
+}
+
+type shash32 interface {
+	Sum32() uint32
+	Write(data []byte)
+	WriteBype(data byte)
+}
+
+type (
+	BKDR32 uint32
+	DJB32  uint32
+)
+
+func (s *BKDR32) Sum32() uint32 { return uint32(*s) }
+func (s *DJB32) Sum32() uint32  { return uint32(*s) }
+
+func (s *BKDR32) Write(data []byte) {
+	hash := *s
+	for _, c := range data {
+		hash = hash*BKDR32seed + BKDR32(c)
+	}
+	*s = hash
+}
+
+func (s *DJB32) Write(data []byte) {
+	hash := *s
+	for _, c := range data {
+		hash = ((hash << 5) + hash) + DJB32(c)
+	}
+	*s = hash
+}
+
+func (s *BKDR32) WriteBype(data byte) {
+	hash := *s
+	hash = hash*BKDR32seed + BKDR32(data)
+	*s = hash
+}
+
+func (s *DJB32) WriteBype(data byte) {
+	hash := *s
+	hash = ((hash << 5) + hash) + DJB32(data)
+	*s = hash
+}
+
+type tMap struct {
+	lock *sync.Mutex
+	m    map[uint64]interface{}
+}
+
+func (this tMap) add(k uint64, v interface{}) {
+	this.lock.Lock()
+	defer func() {
+		this.lock.Unlock()
+	}()
+	if _, ok := this.m[k]; !ok {
+		this.m[k] = v
+	}
 }
 
 //sort util func-------------------------------------------------------------------------------------------
