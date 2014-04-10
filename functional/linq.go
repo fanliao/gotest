@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"unsafe"
 )
 
 var (
@@ -53,7 +54,7 @@ func (this listSource) ToSlice(keepOrder bool) []interface{} {
 		i := 0
 		results := make([]interface{}, len(data), len(data))
 		for k, v := range data {
-			results[i] = &keyValue{k, v}
+			results[i] = &KeyValue{k, v}
 			i++
 		}
 		return results
@@ -71,7 +72,7 @@ func (this listSource) ToSlice(keepOrder bool) []interface{} {
 			l := value.Len()
 			results := make([]interface{}, l, l)
 			for i, k := range value.MapKeys() {
-				results[i] = &keyValue{k.Interface(), value.MapIndex(k).Interface()}
+				results[i] = &KeyValue{k.Interface(), value.MapIndex(k).Interface()}
 			}
 			return results
 		}
@@ -113,23 +114,6 @@ func (this chanSource) Close() {
 }
 
 func (this chanSource) ToSlice(keepOrder bool) []interface{} {
-	//chunks := make([]*chunk, 0, 4)
-	//for c := range this.data {
-	//	chunks = appendChunkSlice(chunks, c)
-	//}
-
-	//count := 0
-	//for _, c := range chunks {
-	//	count = count + len(c.data)
-	//}
-
-	//result := make([]interface{}, 0, count)
-	//start := 0
-	//for _, c := range chunks {
-	//	copy(result[start:start+len(c.data)], c.data)
-	//}
-	//return result
-
 	chunks := make([]interface{}, 0, 2)
 	for c := range this.data {
 		chunks = appendSlice(chunks, c)
@@ -147,13 +131,17 @@ func (this chanSource) ToChan() chan interface{} {
 		}
 	}()
 	return out
-
 }
 
-type keyValue struct {
+type KeyValue struct {
 	key   interface{}
 	value interface{}
 }
+
+//type hKeyValue struct {
+//	keyHash uint64
+//	KeyValue
+//}
 
 //the queryable struct-------------------------------------------------------------------------
 type Queryable struct {
@@ -222,6 +210,11 @@ func (this Queryable) GroupBy(keySelector func(interface{}) interface{}) Queryab
 	return this
 }
 
+func (this Queryable) hGroupBy(keySelector func(interface{}) interface{}) Queryable {
+	this.steps = append(this.steps, commonStep{ACT_HGROUPBY, keySelector, numCPU})
+	return this
+}
+
 func (this Queryable) Join(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
@@ -283,6 +276,7 @@ const (
 	ACT_SELECT int = iota
 	ACT_WHERE
 	ACT_GROUPBY
+	ACT_HGROUPBY
 	ACT_ORDERBY
 	ACT_DISTINCT
 	ACT_JOIN
@@ -300,7 +294,9 @@ func (this commonStep) stepAction() (act stepAction) {
 	case ACT_ORDERBY:
 		act = getOrder(this.act.(func(interface{}, interface{}) int))
 	case ACT_GROUPBY:
-		act = getGroupBy(this.act.(func(interface{}) interface{}), this.degree)
+		act = getGroupBy(this.act.(func(interface{}) interface{}), false, this.degree)
+	case ACT_HGROUPBY:
+		act = getGroupBy(this.act.(func(interface{}) interface{}), true, this.degree)
 	}
 	return
 }
@@ -424,7 +420,7 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
 		reduceSrc := make(chan *chunk)
 		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
+			reduceSrc <- &chunk{getHKeyValues(c, distinctFunc, nil), c.order}
 			return
 		}
 
@@ -444,7 +440,7 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 			chunks = appendSlice(chunks, c)
 			result := make([]interface{}, 0, 2)
 			for _, v := range c.data {
-				kv := v.(*keyValue)
+				kv := v.(*KeyValue)
 				if _, ok := distKvs[kv.key]; !ok {
 					distKvs[kv.key] = 1
 					result = appendSlice(result, kv.value)
@@ -460,11 +456,39 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 }
 
 //note the groupby cannot keep order because the map cannot keep order
-func getGroupBy(groupFunc func(interface{}) interface{}, degree int) stepAction {
+func getGroupBy(groupFunc func(interface{}) interface{}, getHash bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+		groupKvs := make(map[interface{}]interface{})
+		groupHKvs := make(map[interface{}]interface{})
+		var getKVfunc func(*chunk, func(v interface{}) interface{}, *[]interface{}) []interface{}
+		var groupKv func(interface{})
+
+		if getHash {
+			getKVfunc = getHKeyValues
+			groupKv = func(v interface{}) {
+				kv := v.(*KeyValue)
+				if list, ok := groupHKvs[kv.key]; !ok {
+					groupHKvs[kv.key] = []interface{}{kv}
+				} else {
+					groupHKvs[kv.key] = appendSlice(list.([]interface{}), kv)
+				}
+			}
+		} else {
+			getKVfunc = getKeyValues
+			groupKv = func(v interface{}) {
+				kv := v.(*KeyValue)
+				if v, ok := groupKvs[kv.key]; !ok {
+					groupKvs[kv.key] = []interface{}{kv.value}
+				} else {
+					list := v.([]interface{})
+					groupKvs[kv.key] = appendSlice(list, kv.value)
+				}
+			}
+		}
+
 		reduceSrc := make(chan *chunk)
 		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
+			reduceSrc <- &chunk{getKVfunc(c, groupFunc, nil), c.order}
 			return
 		}
 
@@ -478,20 +502,17 @@ func getGroupBy(groupFunc func(interface{}) interface{}, degree int) stepAction 
 		}
 
 		//get key with group values values
-		groupKvs := make(map[interface{}]interface{})
 		reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
 			for _, v := range c.data {
-				kv := v.(*keyValue)
-				if v, ok := groupKvs[kv.key]; !ok {
-					groupKvs[kv.key] = []interface{}{kv.value}
-				} else {
-					list := v.([]interface{})
-					groupKvs[kv.key] = appendSlice(list, kv.value)
-				}
+				groupKv(v)
 			}
 		})
 
-		return &listSource{groupKvs}, keepOrder, nil
+		if getHash {
+			return &listSource{groupHKvs}, keepOrder, nil
+		} else {
+			return &listSource{groupKvs}, keepOrder, nil
+		}
 	})
 }
 
@@ -500,11 +521,11 @@ func getJoin(inner interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
 	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
-		func(outerkv *keyValue, innerList []interface{}, results *[]interface{}) {
+		func(outerkv *KeyValue, innerList []interface{}, results *[]interface{}) {
 			for _, iv := range innerList {
-				*results = appendSlice(*results, resultSelector(outerkv.value, iv))
+				*results = appendSlice(*results, resultSelector(outerkv.value, iv.(*KeyValue).value))
 			}
-		}, func(outerkv *keyValue, results *[]interface{}) {
+		}, func(outerkv *KeyValue, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, nil))
 		}, isLeftJoin, degree)
 }
@@ -513,10 +534,11 @@ func getGroupJoin(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, []interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
+
 	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
-		func(outerkv *keyValue, innerList []interface{}, results *[]interface{}) {
+		func(outerkv *KeyValue, innerList []interface{}, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, innerList))
-		}, func(outerkv *keyValue, results *[]interface{}) {
+		}, func(outerkv *KeyValue, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, []interface{}{}))
 		}, isLeftJoin, degree)
 }
@@ -524,12 +546,12 @@ func getGroupJoin(inner interface{},
 func getJoinImpl(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
-	matchSelector func(*keyValue, []interface{}, *[]interface{}),
-	unmatchSelector func(*keyValue, *[]interface{}), isLeftJoin bool, degree int) stepAction {
+	matchSelector func(*KeyValue, []interface{}, *[]interface{}),
+	unmatchSelector func(*KeyValue, *[]interface{}), isLeftJoin bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		keep = keepOrder
 		innerKVtask := promise.Start(func() []interface{} {
-			innerKvs := From(inner).GroupBy(innerKeySelector).get().(*listSource).data
+			innerKvs := From(inner).hGroupBy(innerKeySelector).get().(*listSource).data
 			return []interface{}{innerKvs, true}
 		})
 
@@ -539,24 +561,26 @@ func getJoinImpl(inner interface{},
 					fmt.Println(e)
 				}
 			}()
-			outerKvs := getKeyValues(c, outerKeySelector, nil)
+			outerKvs := getHKeyValues(c, outerKeySelector, nil)
 			results := make([]interface{}, 0, 10)
 
 			if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
 				//todo:
-
+				fmt.Println("error", ok, r)
 			} else {
 				innerKvs := r[0].(map[interface{}]interface{})
 
 				for _, o := range outerKvs {
-					outerkv := o.(*keyValue)
+					outerkv := o.(*KeyValue)
 					if innerList, ok := innerKvs[outerkv.key]; ok {
+						//fmt.Println("outer", *outerkv, "inner", innerList)
 						matchSelector(outerkv, innerList.([]interface{}), &results)
 						//innerList1 := innerList.([]interface{})
 						//for _, iv := range innerList1 {
 						//	results = appendSlice(results, resultSelector(outerkv.value, iv))
 						//}
 					} else if isLeftJoin {
+						//fmt.Println("outer", *outerkv)
 						unmatchSelector(outerkv, &results)
 						//results = appendSlice(results, resultSelector(outerkv.value, nil))
 					}
@@ -776,49 +800,109 @@ func ceilSplitSize(a int, b int) int {
 	}
 }
 
-func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, keyValues *[]interface{}) []interface{} {
-	if keyValues == nil {
+func getHKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, hKeyValues *[]interface{}) []interface{} {
+	if hKeyValues == nil {
 		list := (make([]interface{}, len(c.data), len(c.data)))
-		keyValues = &list
+		hKeyValues = &list
 	}
 	mapSlice(c.data, func(v interface{}) interface{} {
-		return &keyValue{keyFunc(v), v}
-	}, keyValues)
-	return *keyValues
+		k := keyFunc(v)
+		return &KeyValue{tHash(k), v}
+	}, hKeyValues)
+	return *hKeyValues
 }
 
-func BKDRHash(s string) uint {
+func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *[]interface{}) []interface{} {
+	if KeyValues == nil {
+		list := (make([]interface{}, len(c.data), len(c.data)))
+		KeyValues = &list
+	}
+	mapSlice(c.data, func(v interface{}) interface{} {
+		k := keyFunc(v)
+		return &KeyValue{k, v}
+	}, KeyValues)
+	return *KeyValues
+}
+
+//hash an object-----------------------------------------------
+// interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
+type interfaceHeader struct {
+	typ  *rtype
+	word uintptr
+}
+
+// rtype is the common implementation of most values.
+// It is embedded in other, public struct types, but always
+// with a unique tag like `reflect:"array"` or `reflect:"ptr"`
+// so that code cannot convert from, say, *arrayType to *ptrType.
+type rtype struct {
+	size              uintptr        // size in bytes
+	hash              uint32         // hash of type; avoids computation in hash tables
+	_                 uint8          // unused/padding
+	align             uint8          // alignment of variable with this type
+	fieldAlign        uint8          // alignment of struct field with this type
+	kind              uint8          // enumeration for C
+	alg               *uintptr       // algorithm table (../runtime/runtime.h:/Alg)
+	gc                unsafe.Pointer // garbage collection data
+	string            *string        // string form; unnecessary but undeniably useful
+	ptrToUncommonType uintptr        // (relatively) uncommon fields
+	ptrToThis         *rtype         // type for pointer to this type, if used in binary or has methods
+}
+
+const ptrSize = unsafe.Sizeof((*byte)(nil))
+
+func dataPtr(data interface{}) (ptr unsafe.Pointer, size uintptr) {
+	headerPtr := *((*interfaceHeader)(unsafe.Pointer(&data)))
+	//var dataPtr unsafe.Pointer
+	//if ptr.typ.kind == uint8(reflect.Ptr) {
+	//	//如果是指针类型，则this.word就是数据的地址
+	//	dataPtr = unsafe.Pointer(ptr.word)
+	//}
+
+	if headerPtr.typ != nil {
+		size = headerPtr.typ.size
+		if size > ptrSize && headerPtr.word != 0 {
+			//如果是非指针类型并且数据size大于一个字，则interface的word是数据的地址
+			ptr = unsafe.Pointer(headerPtr.word)
+		} else {
+			//如果是非指针类型并且数据size小于等于一个字，则interface的word是数据本身
+			ptr = unsafe.Pointer(&(headerPtr.word))
+		}
+	}
+	return
+}
+
+func BKDRHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
 	var seed uint32 = 131
 	var hash uint32 = 0
 
-	cs := []int(s)
-	for _, c = range cs {
-		hash = hash*seed + c
+	//cs := []byte(s)
+	var i uintptr
+	//	for _, c := range cs {
+	for i = 0; i < size; i++ {
+		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
+		hash = hash*seed + uint32(c)
 	}
 
 	return (hash & 0x7FFFFFFF)
 }
 
-//// AP Hash Function
-//unsigned int APHash(char *str)
-//{
-//    unsigned int hash = 0;
-//    int i;
+func DJBHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
+	var hash uint32 = 5381
 
-//    for (i=0; *str; i++)
-//    {
-//        if ((i & 1) == 0)
-//        {
-//            hash ^= ((hash << 7) ^ (*str++) ^ (hash >> 3));
-//        }
-//        else
-//        {
-//            hash ^= (~((hash << 11) ^ (*str++) ^ (hash >> 5)));
-//        }
-//    }
+	var i uintptr
+	for i = 0; i < size; i++ {
+		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
+		hash = ((hash << 5) + hash) + uint32(c)
+	}
+	return hash
+}
 
-//    return (hash & 0x7FFFFFFF);
-//}
+func tHash(data interface{}) uint64 {
+	dataPtr, size := dataPtr(data)
+	bkdr, djb := BKDRHash(dataPtr, size), DJBHash(dataPtr, size)
+	return uint64(bkdr)<<32 | uint64(djb)
+}
 
 //sort util func-------------------------------------------------------------------------------------------
 type sortable struct {

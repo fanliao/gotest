@@ -161,7 +161,7 @@ func main() {
 		return v.(int) / 10
 	}).Results()
 	for _, o := range dst {
-		kv := o.(*keyValue)
+		kv := o.(*KeyValue)
 		fmt.Println("group get k=", kv.key, ";v=", kv.value, " ")
 	}
 	fmt.Println("")
@@ -185,7 +185,11 @@ func main() {
 		func(o interface{}) interface{} { return o },
 		func(i interface{}) interface{} { return i.(power).i },
 		func(o interface{}, is []interface{}) interface{} {
-			return keyValue{o, is}
+			newIs := make([]interface{}, len(is), len(is))
+			for i, v := range is {
+				newIs[i] = *(v.(*KeyValue))
+			}
+			return KeyValue{o, newIs}
 		}).Results()
 	fmt.Println("groupjoin ", src1)
 	fmt.Println("with", pow1)
