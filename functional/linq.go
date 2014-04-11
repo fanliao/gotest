@@ -215,6 +215,11 @@ func (this Queryable) hGroupBy(keySelector func(interface{}) interface{}) Querya
 	return this
 }
 
+func (this Queryable) Union(source2 interface{}) Queryable {
+	this.steps = append(this.steps, commonStep{ACT_UNION, source2, numCPU})
+	return this
+}
+
 func (this Queryable) Join(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
@@ -281,6 +286,7 @@ const (
 	ACT_DISTINCT
 	ACT_JOIN
 	ACT_GROUPJOIN
+	ACT_UNION
 )
 
 func (this commonStep) stepAction() (act stepAction) {
@@ -297,6 +303,8 @@ func (this commonStep) stepAction() (act stepAction) {
 		act = getGroupBy(this.act.(func(interface{}) interface{}), false, this.degree)
 	case ACT_HGROUPBY:
 		act = getGroupBy(this.act.(func(interface{}) interface{}), true, this.degree)
+	case ACT_UNION:
+		act = getUnion(this.act, this.degree)
 	}
 	return
 }
@@ -458,31 +466,21 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 //note the groupby cannot keep order because the map cannot keep order
 func getGroupBy(groupFunc func(interface{}) interface{}, getHash bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
-		groupKvs := make(map[interface{}]interface{})
-		groupHKvs := make(map[interface{}]interface{})
 		var getKVfunc func(*chunk, func(v interface{}) interface{}, *[]interface{}) []interface{}
-		var groupKv func(interface{})
-
 		if getHash {
 			getKVfunc = getHKeyValues
-			groupKv = func(v interface{}) {
-				kv := v.(*KeyValue)
-				if list, ok := groupHKvs[kv.key]; !ok {
-					groupHKvs[kv.key] = []interface{}{kv}
-				} else {
-					groupHKvs[kv.key] = appendSlice(list.([]interface{}), kv)
-				}
-			}
 		} else {
 			getKVfunc = getKeyValues
-			groupKv = func(v interface{}) {
-				kv := v.(*KeyValue)
-				if v, ok := groupKvs[kv.key]; !ok {
-					groupKvs[kv.key] = []interface{}{kv.value}
-				} else {
-					list := v.([]interface{})
-					groupKvs[kv.key] = appendSlice(list, kv.value)
-				}
+		}
+
+		groupKvs := make(map[interface{}]interface{})
+		groupKv := func(v interface{}) {
+			kv := v.(*KeyValue)
+			if v, ok := groupKvs[kv.key]; !ok {
+				groupKvs[kv.key] = []interface{}{kv.value}
+			} else {
+				list := v.([]interface{})
+				groupKvs[kv.key] = appendSlice(list, kv.value)
 			}
 		}
 
@@ -508,11 +506,7 @@ func getGroupBy(groupFunc func(interface{}) interface{}, getHash bool, degree in
 			}
 		})
 
-		if getHash {
-			return &listSource{groupHKvs}, keepOrder, nil
-		} else {
-			return &listSource{groupKvs}, keepOrder, nil
-		}
+		return &listSource{groupKvs}, keepOrder, nil
 	})
 }
 
@@ -523,7 +517,7 @@ func getJoin(inner interface{},
 	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
 		func(outerkv *KeyValue, innerList []interface{}, results *[]interface{}) {
 			for _, iv := range innerList {
-				*results = appendSlice(*results, resultSelector(outerkv.value, iv.(*KeyValue).value))
+				*results = appendSlice(*results, resultSelector(outerkv.value, iv))
 			}
 		}, func(outerkv *KeyValue, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, nil))
@@ -611,7 +605,52 @@ func getJoinImpl(inner interface{},
 
 func getUnion(source2 interface{}, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
-		return nil, keepOrder, nil
+		reduceSrc := make(chan *chunk)
+		mapChunk := func(c *chunk) (r *chunk) {
+			reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+			return
+		}
+
+		//get all values and keys
+		var f *promise.Future
+		switch s := src.(type) {
+		case *listSource:
+			f = parallelMapList(s, mapChunk, degree)
+		case *chanSource:
+			f = parallelMapChan(s, nil, mapChunk, degree)
+		}
+
+		dataSource2 := From(source2).data
+		var f1 *promise.Future
+		switch s := dataSource2.(type) {
+		case *listSource:
+			f1 = parallelMapList(s, mapChunk, degree)
+		case *chanSource:
+			f1 = parallelMapChan(s, nil, mapChunk, degree)
+		}
+
+		f2 := promise.WhenAll(f, f1)
+
+		//get distinct values
+		distKvs := make(map[interface{}]int)
+		chunks := make([]interface{}, 0, degree)
+		reduceChan(f2.GetChan(), reduceSrc, func(c *chunk) {
+			chunks = appendSlice(chunks, c)
+			result := make([]interface{}, 0, 2)
+			for _, v := range c.data {
+				kv := v.(*KeyValue)
+				if _, ok := distKvs[kv.key]; !ok {
+					distKvs[kv.key] = 1
+					result = appendSlice(result, kv.value)
+				}
+			}
+			//fmt.Println("union", len(result), result)
+			c.data = result
+		})
+
+		//get distinct values
+		result := expandChunks(chunks, false)
+		return &listSource{result}, keepOrder, nil
 	})
 }
 
@@ -801,15 +840,9 @@ func ceilSplitSize(a int, b int) int {
 }
 
 func getHKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, hKeyValues *[]interface{}) []interface{} {
-	if hKeyValues == nil {
-		list := (make([]interface{}, len(c.data), len(c.data)))
-		hKeyValues = &list
-	}
-	mapSlice(c.data, func(v interface{}) interface{} {
-		k := keyFunc(v)
-		return &KeyValue{tHash(k), v}
+	return getKeyValues(c, func(v interface{}) interface{} {
+		return tHash(keyFunc(v))
 	}, hKeyValues)
-	return *hKeyValues
 }
 
 func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *[]interface{}) []interface{} {
@@ -872,18 +905,22 @@ func dataPtr(data interface{}) (ptr unsafe.Pointer, size uintptr) {
 	return
 }
 
-func BKDRHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
+func BKDRHash(dataPtr unsafe.Pointer, size uintptr, data interface{}) uint32 {
 	var seed uint32 = 131
 	var hash uint32 = 0
 
 	//cs := []byte(s)
 	var i uintptr
 	//	for _, c := range cs {
+	logs := make([]interface{}, 0, 10)
+	logs = append(logs, data, "\n")
 	for i = 0; i < size; i++ {
 		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
 		hash = hash*seed + uint32(c)
+		logs = append(logs, i, c, hash, "\n")
 	}
 
+	fmt.Println(logs...)
 	return (hash & 0x7FFFFFFF)
 }
 
@@ -900,7 +937,8 @@ func DJBHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
 
 func tHash(data interface{}) uint64 {
 	dataPtr, size := dataPtr(data)
-	bkdr, djb := BKDRHash(dataPtr, size), DJBHash(dataPtr, size)
+	bkdr, djb := BKDRHash(dataPtr, size, data), DJBHash(dataPtr, size)
+	fmt.Println("hash", data, bkdr, djb, uint64(bkdr)<<32|uint64(djb), "\n")
 	return uint64(bkdr)<<32 | uint64(djb)
 }
 

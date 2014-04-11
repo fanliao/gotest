@@ -127,11 +127,13 @@ func main() {
 
 	arrInts := make([]int, 0, 20)
 	src1 := make([]interface{}, 0, 20)
+	src2 := make([]interface{}, 0, 20)
 	pow1 := make([]interface{}, 0, 20)
 	//go func() {
 	for i := 0; i < count; i++ {
 		arrInts = append(arrInts, i)
 		src1 = append(src1, i)
+		src2 = append(src2, i+count/2)
 	}
 	for i := count / 4; i < count/2; i++ {
 		pow1 = append(pow1, power{i, i * i})
@@ -185,15 +187,14 @@ func main() {
 		func(o interface{}) interface{} { return o },
 		func(i interface{}) interface{} { return i.(power).i },
 		func(o interface{}, is []interface{}) interface{} {
-			newIs := make([]interface{}, len(is), len(is))
-			for i, v := range is {
-				newIs[i] = *(v.(*KeyValue))
-			}
-			return KeyValue{o, newIs}
+			return KeyValue{o, is}
 		}).Results()
 	fmt.Println("groupjoin ", src1)
 	fmt.Println("with", pow1)
 	fmt.Println("return", dst, "\n")
+
+	dst = From(src1).Union(src2).Results()
+	fmt.Println("union return ", dst)
 
 	size := count / 4
 	chSrc := make(chan *chunk)
@@ -241,5 +242,7 @@ func main() {
 	//avlToSlice(tree, &result)
 	result := avl.ToSlice()
 	fmt.Println("avl result=", result, "count=", avl.count)
+
+	//fmt.Print
 
 }
