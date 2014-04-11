@@ -201,6 +201,10 @@ func BenchmarkBlockSourceDistinct(b *testing.B) {
 }
 
 func BenchmarkGoLinqDistinct(b *testing.B) {
+	if count > 10000 {
+		b.Fatal()
+		return
+	}
 	for i := 0; i < b.N; i++ {
 		dst, _ := linq.From(arrUser).DistinctBy(func(a linq.T, b linq.T) (bool, error) {
 			v1, v2 := a.(user), b.(user)
@@ -312,6 +316,10 @@ func BenchmarkBlockSourceJoin(b *testing.B) {
 }
 
 func BenchmarkGoLinqJoin(b *testing.B) {
+	if count > 10000 {
+		b.Fatal()
+		return
+	}
 	for i := 0; i < b.N; i++ {
 		dst, _ := linq.From(arrUser).Join(arrRole, func(v linq.T) linq.T {
 			return v.(user).id
@@ -321,23 +329,6 @@ func BenchmarkGoLinqJoin(b *testing.B) {
 		}, func(u linq.T, v linq.T) linq.T {
 			return strconv.Itoa(u.(user).id) + "-" + v.(role).role
 		}).Results()
-		if len(dst) != count {
-			b.Fail()
-			b.Error("size is ", len(dst))
-		}
-	}
-}
-
-func BenchmarkGoLinqParallelJoin(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arrUser).Join(arrRole, func(v linq.T) linq.T {
-			return v.(user).id
-		}, func(v linq.T) linq.T {
-			r := v.(role)
-			return r.uid
-		}, func(u linq.T, v linq.T) linq.T {
-			return strconv.Itoa(u.(user).id) + "-" + v.(role).role
-		}).AsParallel().Results()
 		if len(dst) != count {
 			b.Fail()
 			b.Error("size is ", len(dst))
@@ -368,10 +359,36 @@ func BenchmarkGoLinqUnion(b *testing.B) {
 	}
 }
 
-func BenchmarkGoLinqParallelUnion(b *testing.B) {
+////test concat--------------------------------------------------------------------
+func BenchmarkBlockSourceConcat(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		dst, _ := linq.From(arrUser).Union(arrUser2).AsParallel().Results()
-		if len(dst) != count+count/2 {
+		dst := From(arrUser).Concat(arrUser2).Results()
+		if len(dst) != count+count {
+			b.Fail()
+			//b.Log("arr=", arr)
+			b.Error("size is ", len(dst))
+			b.Log("dst=", dst)
+		}
+	}
+}
+
+////test intersect--------------------------------------------------------------------
+func BenchmarkBlockSourceIntersect(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst := From(arrUser).Intersect(arrUser2).Results()
+		if len(dst) != count/2 {
+			b.Fail()
+			//b.Log("arr=", arr)
+			b.Error("size is ", len(dst))
+			b.Log("dst=", dst)
+		}
+	}
+}
+
+func BenchmarkGoLinqIntersect(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		dst, _ := linq.From(arrUser).Intersect(arrUser2).Results()
+		if len(dst) != count/2 {
 			b.Fail()
 			b.Error("size is ", len(dst))
 		}

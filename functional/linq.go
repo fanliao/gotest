@@ -12,6 +12,12 @@ import (
 	"unsafe"
 )
 
+const (
+	ptrSize        = unsafe.Sizeof((*byte)(nil))
+	kindMask       = 0x7f
+	kindNoPointers = 0x80
+)
+
 var (
 	numCPU             int
 	ErrUnsupportSource = errors.New("unsupport dataSource")
@@ -19,7 +25,7 @@ var (
 
 func init() {
 	numCPU = runtime.NumCPU()
-	fmt.Println("go linq")
+	fmt.Println("ptrSize", ptrSize)
 }
 
 // the struct and interface about data dataSource---------------------------------------------------
@@ -221,6 +227,16 @@ func (this Queryable) Union(source2 interface{}) Queryable {
 	return this
 }
 
+func (this Queryable) Concat(source2 interface{}) Queryable {
+	this.steps = append(this.steps, commonStep{ACT_CONCAT, source2, numCPU})
+	return this
+}
+
+func (this Queryable) Intersect(source2 interface{}) Queryable {
+	this.steps = append(this.steps, commonStep{ACT_INTERSECT, source2, numCPU})
+	return this
+}
+
 func (this Queryable) Join(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
@@ -288,6 +304,8 @@ const (
 	ACT_JOIN
 	ACT_GROUPJOIN
 	ACT_UNION
+	ACT_CONCAT
+	ACT_INTERSECT
 )
 
 func (this commonStep) stepAction() (act stepAction) {
@@ -306,6 +324,10 @@ func (this commonStep) stepAction() (act stepAction) {
 		act = getGroupBy(this.act.(func(interface{}) interface{}), true, this.degree)
 	case ACT_UNION:
 		act = getUnion(this.act, this.degree)
+	case ACT_CONCAT:
+		act = getConcat(this.act, this.degree)
+	case ACT_INTERSECT:
+		act = getIntersect(this.act, this.degree)
 	}
 	return
 }
@@ -447,15 +469,18 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 		chunks := make([]interface{}, 0, degree)
 		reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
 			chunks = appendSlice(chunks, c)
-			result := make([]interface{}, 0, 2)
+			result := make([]interface{}, len(c.data))
+			i := 0
 			for _, v := range c.data {
 				kv := v.(*KeyValue)
 				if _, ok := distKvs[kv.key]; !ok {
 					distKvs[kv.key] = 1
-					result = appendSlice(result, kv.value)
+					//result = appendSlice(result, kv.value)
+					result[i] = kv.value
+					i++
 				}
 			}
-			c.data = result
+			c.data = result[0:i]
 		})
 
 		//get distinct values
@@ -606,82 +631,166 @@ func getJoinImpl(inner interface{},
 
 func getUnion(source2 interface{}, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
-		////reduceSrc := make(chan *chunk)
+		reduceSrc := make(chan *chunk)
 		//m := tMap{new(sync.Mutex), make(map[uint64]interface{})}
-		//mapChunk := func(c *chunk) (r *chunk) {
-		//	//reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
-		//	for _, v := range c.data {
-		//		m.add(tHash(v), v)
-		//	}
-		//	return
-		//}
+		mapChunk := func(c *chunk) (r *chunk) {
+			reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+			//for _, v := range c.data {
+			//	m.add(tHash(v), v)
+			//}
+			return
+		}
 
-		////get all values and keys
-		//var f *promise.Future
-		//switch s := src.(type) {
-		//case *listSource:
-		//	f = parallelMapList(s, mapChunk, degree)
-		//case *chanSource:
-		//	f = parallelMapChan(s, nil, mapChunk, degree)
-		//}
+		//get all values and keys
+		var f *promise.Future
+		switch s := src.(type) {
+		case *listSource:
+			f = parallelMapList(s, mapChunk, degree)
+		case *chanSource:
+			f = parallelMapChan(s, nil, mapChunk, degree)
+		}
 
-		//dataSource2 := From(source2).data
-		//var f1 *promise.Future
-		//switch s := dataSource2.(type) {
-		//case *listSource:
-		//	f1 = parallelMapList(s, mapChunk, degree)
-		//case *chanSource:
-		//	f1 = parallelMapChan(s, nil, mapChunk, degree)
-		//}
+		dataSource2 := From(source2).data
+		var f1 *promise.Future
+		switch s := dataSource2.(type) {
+		case *listSource:
+			f1 = parallelMapList(s, mapChunk, degree)
+		case *chanSource:
+			f1 = parallelMapChan(s, nil, mapChunk, degree)
+		}
 
-		//f2 := promise.WhenAll(f, f1)
+		f2 := promise.WhenAll(f, f1)
 
-		//////get distinct values
-		////distKvs := make(map[interface{}]bool)
-		////chunks := make([]interface{}, 0, 2*degree)
-		////reduceChan(f2.GetChan(), reduceSrc, func(c *chunk) {
-		////	chunks = appendSlice(chunks, c)
-		////	result := make([]interface{}, 0, len(c.data))
-		////	for _, v := range c.data {
-		////		kv := v.(*KeyValue)
-		////		if _, ok := distKvs[kv.key]; !ok {
-		////			distKvs[kv.key] = true
-		////			result = appendSlice(result, kv.value)
-		////		}
-		////	}
-		////	//fmt.Println("union", len(result))
-		////	c.data = result[0:len(result)]
-		////})
-
-		//////get distinct values
-		////result := expandChunks(chunks, false)
-		//_, _ = f2.Get()
-		//result := make([]interface{}, len(m.m))
+		//get distinct values
+		distKvs := make(map[uint64]bool)
+		chunks := make([]interface{}, 0, 2*degree)
+		//result := make([]interface{}, 100000, 100000)
 		//i := 0
-		//for k := range m.m {
-		//	result[i] = m.m[k]
+		reduceChan(f2.GetChan(), reduceSrc, func(c *chunk) {
+			chunks = appendSlice(chunks, c)
+			result := make([]interface{}, len(c.data), len(c.data))
+			i := 0
+			for _, v := range c.data {
+				kv := v.(*KeyValue)
+				if _, ok := distKvs[kv.key.(uint64)]; !ok {
+					distKvs[kv.key.(uint64)] = true
+					result[i] = kv.value
+					i++
+				}
+			}
+			//fmt.Println("union", len(result))
+			c.data = result[0:i]
+		})
+
+		//get distinct values
+		result := expandChunks(chunks, false)
+
+		return &listSource{result}, keepOrder, nil
+
+		//set := make(map[uint64]interface{})
+		//for _, v := range src.ToSlice(false) {
+		//	hashValue := tHash(v)
+		//	if _, ok := set[hashValue]; !ok {
+		//		set[hashValue] = v
+		//	}
+		//}
+		//for _, v := range From(source2).Results() {
+		//	hashValue := tHash(v)
+		//	if _, ok := set[hashValue]; !ok {
+		//		set[hashValue] = v
+		//	}
+		//}
+
+		////set := make(map[interface{}]interface{})
+		////for _, v := range src.ToSlice(false) {
+		////	if _, ok := set[v]; !ok {
+		////		set[v] = v
+		////	}
+		////}
+		////for _, v := range From(source2).Results() {
+		////	if _, ok := set[v]; !ok {
+		////		set[v] = v
+		////	}
+		////}
+		//result := make([]interface{}, len(set))
+		//i := 0
+		//for _, v := range set {
+		//	result[i] = v
 		//	i++
 		//}
 		//return &listSource{result}, keepOrder, nil
+	})
+}
 
-		set := make(map[interface{}]bool)
-		for _, v := range src.ToSlice(false) {
-			if _, ok := set[v]; !ok {
-				set[v] = true
+func getConcat(source2 interface{}, degree int) stepAction {
+	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+		slice1, slice2 := src.ToSlice(keepOrder), From(source2).KeepOrder(keepOrder).Results()
+
+		result := make([]interface{}, len(slice1)+len(slice2))
+		_ = copy(result[0:len(slice1)], slice1)
+		_ = copy(result[len(slice1):len(slice1)+len(slice2)], slice2)
+		return &listSource{result}, keepOrder, nil
+	})
+}
+
+func getIntersect(source2 interface{}, degree int) stepAction {
+	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
+
+		distKvs := make(map[uint64]bool)
+
+		f1 := promise.Start(func() []interface{} {
+			reduceSrc := make(chan *chunk)
+			mapChunk := func(c *chunk) (r *chunk) {
+				reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+				return
+			}
+			//get all values and keys
+			var f *promise.Future
+			switch s := src.(type) {
+			case *listSource:
+				f = parallelMapList(s, mapChunk, degree)
+			case *chanSource:
+				f = parallelMapChan(s, nil, mapChunk, degree)
+			}
+			//get distinct values of src1
+			reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
+				for _, v := range c.data {
+					kv := v.(*KeyValue)
+					if _, ok := distKvs[kv.key.(uint64)]; !ok {
+						distKvs[kv.key.(uint64)] = true
+					}
+				}
+
+			})
+			return nil
+		})
+
+		dataSource2 := From(source2).Select(func(v interface{}) interface{} {
+			return &KeyValue{tHash(v), v}
+		}).Results()
+
+		_, _ = f1.Get()
+
+		resultKVs := make(map[uint64]interface{}, len(distKvs))
+		for _, v := range dataSource2 {
+			kv := v.(*KeyValue)
+			if _, ok := distKvs[kv.key.(uint64)]; ok {
+				if _, ok := resultKVs[kv.key.(uint64)]; !ok {
+					resultKVs[kv.key.(uint64)] = kv.value
+				}
 			}
 		}
-		for _, v := range From(source2).Results() {
-			if _, ok := set[v]; !ok {
-				set[v] = true
-			}
-		}
-		result := make([]interface{}, len(set))
+
+		//get distinct values
+		result := make([]interface{}, len(resultKVs))
 		i := 0
-		for k := range set {
-			result[i] = k
+		for _, v := range resultKVs {
+			result[i] = v
 			i++
 		}
-		return &listSource{result}, keepOrder, nil
+
+		return &listSource{result[0:i]}, keepOrder, nil
+
 	})
 }
 
@@ -889,12 +998,6 @@ func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *
 }
 
 //hash an object-----------------------------------------------
-const (
-	ptrSize        = unsafe.Sizeof((*byte)(nil))
-	kindMask       = 0x7f
-	kindNoPointers = 0x80
-)
-
 // interfaceHeader is the header for an interface{} value. it is copied from unsafe.emptyInterface
 type interfaceHeader struct {
 	typ  *rtype
@@ -958,15 +1061,15 @@ func dataPtr(data interface{}) (ptr unsafe.Pointer, typ *rtype) {
 	return
 }
 
-func hashByPtr(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
+func hashByPtr(dataPtr unsafe.Pointer, typ *rtype, hashObj *sHash) {
 	t := typ
 	if t == nil {
-		hashString("nil", hashObj)
+		//hashString("nil", hashObj)
 		hashValue(unsafe.Pointer(uintptr(0)), 0, hashObj)
 		return
 	}
 
-	hashString(*t.string, hashObj)
+	//hashString(*t.string, hashObj)
 	switch t.Kind() {
 	case reflect.String:
 		hashString(*((*string)(dataPtr)), hashObj)
@@ -975,17 +1078,54 @@ func hashByPtr(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
 		//case reflect.Interface:
 		//case reflect.Slice:
 		//case reflect.Array:
+	case reflect.Int8:
+		hashUInt32(uint32(*((*int8)(dataPtr))), hashObj)
+	case reflect.Int16:
+		hashUInt32(uint32(*((*int16)(dataPtr))), hashObj)
+	case reflect.Int32:
+		hashUInt32(uint32(*((*int32)(dataPtr))), hashObj)
+	case reflect.Uint8:
+		hashUInt32(uint32(*((*uint8)(dataPtr))), hashObj)
+	case reflect.Uint16:
+		hashUInt32(uint32(*((*uint16)(dataPtr))), hashObj)
+	case reflect.Uint32:
+		hashUInt32(*((*uint32)(dataPtr)), hashObj)
+	case reflect.Int64:
+		v := *((*int64)(dataPtr))
+		hashUInt32((uint32)(v&0x7FFFFFFF), hashObj)
+		hashUInt32((uint32)(v>>32), hashObj)
+	//hashUInt32(*((*uint32)(dataPtr)), hashObj)
+	case reflect.Uint64:
+		v := *((*uint64)(dataPtr))
+		hashUInt32((uint32)(v&0x7FFFFFFF), hashObj)
+		hashUInt32((uint32)(v>>32), hashObj)
+	case reflect.Int:
+		if ptrSize > 4 {
+			v := *((*int64)(dataPtr))
+			hashUInt32((uint32)(v&0x7FFFFFFF), hashObj)
+			hashUInt32((uint32)(v>>32), hashObj)
+		} else {
+			hashUInt32(uint32(*((*int32)(dataPtr))), hashObj)
+		}
+	case reflect.Uint:
+		if ptrSize > 4 {
+			v := *((*uint64)(dataPtr))
+			hashUInt32((uint32)(v&0x7FFFFFFF), hashObj)
+			hashUInt32((uint32)(v>>32), hashObj)
+		} else {
+			hashUInt32(*((*uint32)(dataPtr)), hashObj)
+		}
 	default:
 		hashValue(dataPtr, typ.size, hashObj)
 	}
 
 }
 
-func hashString(s string, hashObj shash32) {
+func hashString(s string, hashObj *sHash) {
 	hashObj.Write([]byte(s))
 }
 
-func hashStruct(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
+func hashStruct(dataPtr unsafe.Pointer, typ *rtype, hashObj *sHash) {
 	s := *((*structType)(unsafe.Pointer(typ)))
 
 	numField := len(s.fields)
@@ -997,7 +1137,11 @@ func hashStruct(dataPtr unsafe.Pointer, typ *rtype, hashObj shash32) {
 
 }
 
-func hashValue(dataPtr unsafe.Pointer, size uintptr, hashObj shash32) {
+func hashUInt32(data uint32, hashObj *sHash) {
+	hashObj.WriteUInt32(data)
+}
+
+func hashValue(dataPtr unsafe.Pointer, size uintptr, hashObj *sHash) {
 	var i uintptr
 	//logs := make([]interface{}, 0, 10)
 	//logs = append(logs, data, "\n")
@@ -1009,36 +1153,12 @@ func hashValue(dataPtr unsafe.Pointer, size uintptr, hashObj shash32) {
 	//fmt.Println(logs...)
 }
 
-//func BKDRHashS(s string) uint32 {
-//	var seed uint32 = 131
-//	var hash uint32 = 0
-
-//	cs := []byte(s)
-//	for _, c := range cs {
-//		hash = hash*seed + uint32(c)
-//	}
-
-//	return (hash & 0x7FFFFFFF)
-//}
-
-//func DJBHash(dataPtr unsafe.Pointer, size uintptr) uint32 {
-//	var hash uint32 = 5381
-
-//	var i uintptr
-//	for i = 0; i < size; i++ {
-//		c := *((*byte)(unsafe.Pointer(uintptr(dataPtr) + i)))
-//		hash = ((hash << 5) + hash) + uint32(c)
-//	}
-//	return hash
-//}
-
 func tHash(data interface{}) uint64 {
 	dataPtr, size := dataPtr(data)
-	bkdr, djb := NewBKDR32(), NewDJB32()
-	hashByPtr(dataPtr, size, bkdr)
-	hashByPtr(dataPtr, size, djb)
+	sh := NewSHash()
+	hashByPtr(dataPtr, size, sh)
 	//fmt.Println("hash", data, bkdr.Sum32(), djb.Sum32(), uint64(bkdr.Sum32())<<32|uint64(djb.Sum32()), "\n")
-	return uint64(bkdr.Sum32())<<32 | uint64(djb.Sum32())
+	return sh.Sum64()
 }
 
 const (
@@ -1062,6 +1182,7 @@ type shash32 interface {
 	Sum32() uint32
 	Write(data []byte)
 	WriteBype(data byte)
+	WriteUInt32(data uint32)
 }
 
 type (
@@ -1098,6 +1219,49 @@ func (s *DJB32) WriteBype(data byte) {
 	hash := *s
 	hash = ((hash << 5) + hash) + DJB32(data)
 	*s = hash
+}
+
+func (s *BKDR32) WriteUInt32(data uint32) {
+	hash := *s
+	hash = hash*BKDR32seed + BKDR32(data)
+	*s = hash
+}
+
+func (s *DJB32) WriteUInt32(data uint32) {
+	hash := *s
+	hash = ((hash << 5) + hash) + DJB32(data)
+	*s = hash
+}
+
+type sHash struct {
+	hash1 shash32
+	hash2 shash32
+}
+
+func (this *sHash) Sum64() uint64 {
+	//return uint64(this.hash1.Sum32())
+	return uint64(this.hash1.Sum32())<<32 | uint64(this.hash2.Sum32())
+}
+
+func (this *sHash) Write(data []byte) {
+	for _, c := range data {
+		this.hash1.WriteBype(c)
+		this.hash2.WriteBype(c)
+	}
+}
+
+func (this *sHash) WriteBype(data byte) {
+	this.hash1.WriteBype(data)
+	this.hash2.WriteBype(data)
+}
+
+func (this *sHash) WriteUInt32(data uint32) {
+	this.hash1.WriteUInt32(data)
+	this.hash2.WriteUInt32(data)
+}
+
+func NewSHash() *sHash {
+	return &sHash{NewBKDR32(), NewDJB32()}
 }
 
 type tMap struct {

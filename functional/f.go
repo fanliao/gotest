@@ -257,8 +257,14 @@ func main() {
 	testHash(0)
 	testHash([]interface{}{1, "user" + strconv.Itoa(2), 0})
 	testHash([]interface{}{1, "user" + strconv.Itoa(2), 0})
+	slice := []interface{}{5, "user" + strconv.Itoa(5)}
+	testHash(slice)
+	testHash(slice)
 	testHash(power{1, 1})
 	testHash(power{1, 1})
+
+	var i64 int64 = 1
+	fmt.Println("convert to int32", int32(i64))
 }
 
 func testHash(data interface{}) {
