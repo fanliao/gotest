@@ -143,6 +143,12 @@ type KeyValue struct {
 	value interface{}
 }
 
+type HKeyValue struct {
+	keyHash uint64
+	key     interface{}
+	value   interface{}
+}
+
 //type hKeyValue struct {
 //	keyHash uint64
 //	KeyValue
@@ -371,7 +377,7 @@ func getWhere(sure func(interface{}) bool, degree int) stepAction {
 			f = promise.Wrap(results)
 		}
 
-		dst, e = getSource(f, func(results []interface{}) dataSource {
+		dst, e = getFutureResult(f, func(results []interface{}) dataSource {
 			result := expandChunks(results, false)
 			return &listSource{result}
 		})
@@ -394,7 +400,7 @@ func getSelect(selectFunc func(interface{}) interface{}, degree int) stepAction 
 				mapSlice(c.data, selectFunc, &out)
 				return nil
 			}, degree)
-			dst, e = getSource(f, func(r []interface{}) dataSource {
+			dst, e = getFutureResult(f, func(r []interface{}) dataSource {
 				//fmt.Println("results=", results)
 				return &listSource{results}
 			})
@@ -435,7 +441,7 @@ func getOrder(compare func(interface{}, interface{}) int) stepAction {
 				return nil
 			}, 1)
 
-			dst, e = getSource(f, func(r []interface{}) dataSource {
+			dst, e = getFutureResult(f, func(r []interface{}) dataSource {
 				return &listSource{avl.ToSlice()}
 			})
 			keep = true
@@ -449,7 +455,7 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
 		reduceSrc := make(chan *chunk)
 		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getHKeyValues(c, distinctFunc, nil), c.order}
+			reduceSrc <- &chunk{getKeyValues(c, distinctFunc, nil), c.order}
 			return
 		}
 
@@ -463,16 +469,16 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 		}
 
 		//get distinct values
-		distKvs := make(map[interface{}]int)
+		distKvs := make(map[uint64]int)
 		chunks := make([]interface{}, 0, degree)
 		reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
 			chunks = appendSlice(chunks, c)
 			result := make([]interface{}, len(c.data))
 			i := 0
 			for _, v := range c.data {
-				kv := v.(*KeyValue)
-				if _, ok := distKvs[kv.key]; !ok {
-					distKvs[kv.key] = 1
+				kv := v.(*HKeyValue)
+				if _, ok := distKvs[kv.keyHash]; !ok {
+					distKvs[kv.keyHash] = 1
 					//result = appendSlice(result, kv.value)
 					result[i] = kv.value
 					i++
@@ -488,29 +494,30 @@ func getDistinct(distinctFunc func(interface{}) interface{}, degree int) stepAct
 }
 
 //note the groupby cannot keep order because the map cannot keep order
-func getGroupBy(groupFunc func(interface{}) interface{}, getHash bool, degree int) stepAction {
+func getGroupBy(groupFunc func(interface{}) interface{}, hashAsKey bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dataSource, bool, error) {
-		var getKVfunc func(*chunk, func(v interface{}) interface{}, *[]interface{}) []interface{}
-		if getHash {
-			getKVfunc = getHKeyValues
+		var getKey func(*HKeyValue) interface{}
+		if hashAsKey {
+			getKey = func(kv *HKeyValue) interface{} { return kv.keyHash }
 		} else {
-			getKVfunc = getKeyValues
+			getKey = func(kv *HKeyValue) interface{} { return kv.key }
 		}
 
 		groupKvs := make(map[interface{}]interface{})
 		groupKv := func(v interface{}) {
-			kv := v.(*KeyValue)
-			if v, ok := groupKvs[kv.key]; !ok {
-				groupKvs[kv.key] = []interface{}{kv.value}
+			kv := v.(*HKeyValue)
+			k := getKey(kv)
+			if v, ok := groupKvs[k]; !ok {
+				groupKvs[k] = []interface{}{kv.value}
 			} else {
 				list := v.([]interface{})
-				groupKvs[kv.key] = appendSlice(list, kv.value)
+				groupKvs[k] = appendSlice(list, kv.value)
 			}
 		}
 
 		reduceSrc := make(chan *chunk)
 		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getKVfunc(c, groupFunc, nil), c.order}
+			reduceSrc <- &chunk{getKeyValues(c, groupFunc, nil), c.order}
 			return
 		}
 
@@ -539,11 +546,11 @@ func getJoin(inner interface{},
 	innerKeySelector func(interface{}) interface{},
 	resultSelector func(interface{}, interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
 	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
-		func(outerkv *KeyValue, innerList []interface{}, results *[]interface{}) {
+		func(outerkv *HKeyValue, innerList []interface{}, results *[]interface{}) {
 			for _, iv := range innerList {
 				*results = appendSlice(*results, resultSelector(outerkv.value, iv))
 			}
-		}, func(outerkv *KeyValue, results *[]interface{}) {
+		}, func(outerkv *HKeyValue, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, nil))
 		}, isLeftJoin, degree)
 }
@@ -554,9 +561,9 @@ func getGroupJoin(inner interface{},
 	resultSelector func(interface{}, []interface{}) interface{}, isLeftJoin bool, degree int) stepAction {
 
 	return getJoinImpl(inner, outerKeySelector, innerKeySelector,
-		func(outerkv *KeyValue, innerList []interface{}, results *[]interface{}) {
+		func(outerkv *HKeyValue, innerList []interface{}, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, innerList))
-		}, func(outerkv *KeyValue, results *[]interface{}) {
+		}, func(outerkv *HKeyValue, results *[]interface{}) {
 			*results = appendSlice(*results, resultSelector(outerkv.value, []interface{}{}))
 		}, isLeftJoin, degree)
 }
@@ -564,8 +571,8 @@ func getGroupJoin(inner interface{},
 func getJoinImpl(inner interface{},
 	outerKeySelector func(interface{}) interface{},
 	innerKeySelector func(interface{}) interface{},
-	matchSelector func(*KeyValue, []interface{}, *[]interface{}),
-	unmatchSelector func(*KeyValue, *[]interface{}), isLeftJoin bool, degree int) stepAction {
+	matchSelector func(*HKeyValue, []interface{}, *[]interface{}),
+	unmatchSelector func(*HKeyValue, *[]interface{}), isLeftJoin bool, degree int) stepAction {
 	return stepAction(func(src dataSource, keepOrder bool) (dst dataSource, keep bool, e error) {
 		keep = keepOrder
 		innerKVtask := promise.Start(func() []interface{} {
@@ -579,7 +586,7 @@ func getJoinImpl(inner interface{},
 					fmt.Println(e)
 				}
 			}()
-			outerKvs := getHKeyValues(c, outerKeySelector, nil)
+			outerKvs := getKeyValues(c, outerKeySelector, nil)
 			results := make([]interface{}, 0, 10)
 
 			if r, ok := innerKVtask.Get(); ok != promise.RESULT_SUCCESS {
@@ -589,8 +596,8 @@ func getJoinImpl(inner interface{},
 				innerKvs := r[0].(map[interface{}]interface{})
 
 				for _, o := range outerKvs {
-					outerkv := o.(*KeyValue)
-					if innerList, ok := innerKvs[outerkv.key]; ok {
+					outerkv := o.(*HKeyValue)
+					if innerList, ok := innerKvs[outerkv.keyHash]; ok {
 						//fmt.Println("outer", *outerkv, "inner", innerList)
 						matchSelector(outerkv, innerList.([]interface{}), &results)
 						//innerList1 := innerList.([]interface{})
@@ -611,7 +618,7 @@ func getJoinImpl(inner interface{},
 		switch s := src.(type) {
 		case *listSource:
 			outerKeySelectorFuture := parallelMapList(s, mapChunk, degree)
-			dst, e = getSource(outerKeySelectorFuture, func(results []interface{}) dataSource {
+			dst, e = getFutureResult(outerKeySelectorFuture, func(results []interface{}) dataSource {
 				result := expandChunks(results, false)
 				return &listSource{result}
 			})
@@ -632,7 +639,7 @@ func getUnion(source2 interface{}, degree int) stepAction {
 		reduceSrc := make(chan *chunk)
 		//m := tMap{new(sync.Mutex), make(map[uint64]interface{})}
 		mapChunk := func(c *chunk) (r *chunk) {
-			reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+			reduceSrc <- &chunk{getKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
 			//for _, v := range c.data {
 			//	m.add(tHash(v), v)
 			//}
@@ -669,9 +676,9 @@ func getUnion(source2 interface{}, degree int) stepAction {
 			result := make([]interface{}, len(c.data), len(c.data))
 			i := 0
 			for _, v := range c.data {
-				kv := v.(*KeyValue)
-				if _, ok := distKvs[kv.key.(uint64)]; !ok {
-					distKvs[kv.key.(uint64)] = true
+				kv := v.(*HKeyValue)
+				if _, ok := distKvs[kv.keyHash]; !ok {
+					distKvs[kv.keyHash] = true
 					result[i] = kv.value
 					i++
 				}
@@ -739,7 +746,7 @@ func getIntersect(source2 interface{}, degree int) stepAction {
 		f1 := promise.Start(func() []interface{} {
 			reduceSrc := make(chan *chunk)
 			mapChunk := func(c *chunk) (r *chunk) {
-				reduceSrc <- &chunk{getHKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
+				reduceSrc <- &chunk{getKeyValues(c, func(v interface{}) interface{} { return v }, nil), c.order}
 				return
 			}
 			//get all values and keys
@@ -753,9 +760,9 @@ func getIntersect(source2 interface{}, degree int) stepAction {
 			//get distinct values of src1
 			reduceChan(f.GetChan(), reduceSrc, func(c *chunk) {
 				for _, v := range c.data {
-					kv := v.(*KeyValue)
-					if _, ok := distKvs[kv.key.(uint64)]; !ok {
-						distKvs[kv.key.(uint64)] = true
+					kv := v.(*HKeyValue)
+					if _, ok := distKvs[kv.keyHash]; !ok {
+						distKvs[kv.keyHash] = true
 					}
 				}
 
@@ -772,9 +779,10 @@ func getIntersect(source2 interface{}, degree int) stepAction {
 		resultKVs := make(map[uint64]interface{}, len(distKvs))
 		for _, v := range dataSource2 {
 			kv := v.(*KeyValue)
-			if _, ok := distKvs[kv.key.(uint64)]; ok {
-				if _, ok := resultKVs[kv.key.(uint64)]; !ok {
-					resultKVs[kv.key.(uint64)] = kv.value
+			k := kv.key.(uint64)
+			if _, ok := distKvs[k]; ok {
+				if _, ok := resultKVs[k]; !ok {
+					resultKVs[k] = kv.value
 				}
 			}
 		}
@@ -858,7 +866,7 @@ func reduceChan(chEndFlag chan *promise.PromiseResult, src chan *chunk, reduce f
 	}
 }
 
-func getSource(f *promise.Future, dataSourceFunc func([]interface{}) dataSource) (dataSource, error) {
+func getFutureResult(f *promise.Future, dataSourceFunc func([]interface{}) dataSource) (dataSource, error) {
 	if results, typ := f.Get(); typ != promise.RESULT_SUCCESS {
 		//todo
 		return nil, nil
@@ -977,11 +985,11 @@ func ceilSplitSize(a int, b int) int {
 	}
 }
 
-func getHKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, hKeyValues *[]interface{}) []interface{} {
-	return getKeyValues(c, func(v interface{}) interface{} {
-		return tHash(keyFunc(v))
-	}, hKeyValues)
-}
+//func getHKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, hKeyValues *[]interface{}) []interface{} {
+//	return getKeyValues(c, func(v interface{}) interface{} {
+//		return tHash(keyFunc(v))
+//	}, hKeyValues)
+//}
 
 func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *[]interface{}) []interface{} {
 	if KeyValues == nil {
@@ -990,7 +998,7 @@ func getKeyValues(c *chunk, keyFunc func(v interface{}) interface{}, KeyValues *
 	}
 	mapSlice(c.data, func(v interface{}) interface{} {
 		k := keyFunc(v)
-		return &KeyValue{k, v}
+		return &HKeyValue{tHash(k), k, v}
 	}, KeyValues)
 	return *KeyValues
 }
