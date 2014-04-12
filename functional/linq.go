@@ -1279,6 +1279,18 @@ func (this tMap) add(k uint64, v interface{}) {
 	}
 }
 
+func getHash(v interface{}) {
+	steps := make([]uint32, 10, 10)
+	return func(v interface{}) uint64 {
+		dataPtr, size := dataPtr(data)
+		sh := NewSHash()
+		hashByPtr(dataPtr, size, sh)
+		//fmt.Println("hash", data, bkdr.Sum32(), djb.Sum32(), uint64(bkdr.Sum32())<<32|uint64(djb.Sum32()), "\n")
+		return sh.Sum64()
+
+	}
+}
+
 //sort util func-------------------------------------------------------------------------------------------
 type sortable struct {
 	values []interface{}
