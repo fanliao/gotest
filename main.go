@@ -7,6 +7,7 @@ import (
 	//"os"
 	//"runtime/pprof"
 	//"errors"
+	"github.com/fanliao/go-plinq"
 	"reflect"
 	"strconv"
 	"strings"
@@ -129,13 +130,23 @@ func main() {
 	//time.Sleep(1 * time.Second)
 	//close(c)
 	//time.Sleep(2 * time.Second)
-	o := &RWTestStruct1{}
-	o = nil
-	fmt.Println("o.test() return2 ", o.test(), "o is", o)
+	//o := &RWTestStruct1{}
+	//o = nil
+	//fmt.Println("o.test() return2 ", o.test(), "o is", o)
 
-	testPipeWhenDone()
-	testMakeFunc()
-
+	//testPipeWhenDone()
+	//testMakeFunc()
+	func() {
+		defer func() {
+			if e := recover(); e != nil {
+				fmt.Println("test send to close chan", e)
+			}
+		}()
+		c := make(chan int)
+		close(c)
+		c <- 1
+	}()
+	plinq.TestLinq()
 }
 
 func benchmarkFastRWerGet(n int) {
