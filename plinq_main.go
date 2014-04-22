@@ -192,12 +192,32 @@ func TestLinq() {
 
 	//test Skip
 	testLinqWithAllSource("Skip opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.Skip(6)
+		return q.Skip(12)
+	})
+
+	//test Skip
+	testLinqWithAllSource("Skip all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Skip(31)
+	})
+
+	//test Skip
+	testLinqWithAllSource("Skip 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Skip(-1)
 	})
 
 	//test Take
 	testLinqWithAllSource("Take opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.Take(6)
+		return q.Take(12)
+	})
+
+	//test Skip
+	testLinqWithAllSource("Take all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Take(31)
+	})
+
+	//test Skip
+	testLinqWithAllSource("Take 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Take(-1)
 	})
 
 	//test SkipWhile
@@ -248,10 +268,10 @@ func TestLinq() {
 	size := count / 4
 	chunkSrc := make(chan *plinq.Chunk)
 	go func() {
-		chunkSrc <- &plinq.Chunk{src1[0:size], 0}
-		chunkSrc <- &plinq.Chunk{src1[size : 2*size], size}
-		chunkSrc <- &plinq.Chunk{src1[2*size : 3*size], 2 * size}
-		chunkSrc <- &plinq.Chunk{src1[3*size : 4*size], 3 * size}
+		chunkSrc <- &plinq.Chunk{src1[0:size], 0, 0}
+		chunkSrc <- &plinq.Chunk{src1[size : 2*size], size, size}
+		chunkSrc <- &plinq.Chunk{src1[2*size : 3*size], 2 * size, 2 * size}
+		chunkSrc <- &plinq.Chunk{src1[3*size : 4*size], 3 * size, 3 * size}
 		chunkSrc <- nil
 		close(chunkSrc)
 		fmt.Println("close src------------------", chunkSrc)

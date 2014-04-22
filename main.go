@@ -7,7 +7,6 @@ import (
 	//"os"
 	//"runtime/pprof"
 	//"errors"
-	"github.com/fanliao/go-plinq"
 	"reflect"
 	"strconv"
 	"strings"
@@ -146,7 +145,7 @@ func main() {
 		close(c)
 		c <- 1
 	}()
-	plinq.TestLinq()
+	TestLinq()
 }
 
 func benchmarkFastRWerGet(n int) {
