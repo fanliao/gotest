@@ -190,35 +190,35 @@ func TestLinq() {
 		return q.Aggregate(plinq.Sum, plinq.Count, plinq.Max, plinq.Min)
 	})
 
-	////test Skip
-	//testLinqWithAllSource("Skip opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Skip(12)
-	//})
+	//test Skip
+	testLinqWithAllSource("Skip opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Skip(12)
+	})
 
-	////test Skip
-	//testLinqWithAllSource("Skip all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Skip(31)
-	//})
+	//test Skip
+	testLinqWithAllSource("Skip all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Skip(31)
+	})
 
-	////test Skip
-	//testLinqWithAllSource("Skip 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Skip(-1)
-	//})
+	//test Skip
+	testLinqWithAllSource("Skip 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Skip(-1)
+	})
 
-	////test Take
-	//testLinqWithAllSource("Take opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Take(12)
-	//})
+	//test Take
+	testLinqWithAllSource("Take opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Take(12)
+	})
 
-	////test Skip
-	//testLinqWithAllSource("Take all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Take(31)
-	//})
+	//test Skip
+	testLinqWithAllSource("Take all opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Take(31)
+	})
 
-	////test Skip
-	//testLinqWithAllSource("Take 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Take(-1)
-	//})
+	//test Skip
+	testLinqWithAllSource("Take 0 opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Take(-1)
+	})
 
 	//test SkipWhile
 	testLinqWithAllSource("SkipWhile opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
