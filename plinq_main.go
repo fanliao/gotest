@@ -266,22 +266,24 @@ func TestLinq() {
 	//}
 
 	size := count / 4
+	getChunkByi := func(i int) *plinq.Chunk {
+		return &plinq.Chunk{src1[i*size : (i+1)*size], i, 0}
+	}
+
 	getCChunkSrc := func() chan *plinq.Chunk {
 		chunkSrc := make(chan *plinq.Chunk)
 		go func() {
-			chunkSrc <- &plinq.Chunk{src1[3*size : 4*size], 3, 3 * size}
-			chunkSrc <- &plinq.Chunk{src1[0:size], 0, 0}
-			chunkSrc <- &plinq.Chunk{src1[2*size : 3*size], 2, 2 * size}
-			chunkSrc <- &plinq.Chunk{src1[size : 2*size], 1, size}
-			func() {
-				defer func() {
-					if e := recover(); e != nil {
-						_ = e
-					}
-				}()
-				close(chunkSrc)
+			defer func() {
+				if e := recover(); e != nil {
+					_ = e
+				}
 			}()
-			fmt.Println("close src------------------", chunkSrc)
+			indexs := []int{0, 2, 1, 3}
+			for _, i := range indexs {
+				fmt.Println("\nsend", getChunkByi(i))
+				chunkSrc <- getChunkByi(i)
+			}
+			close(chunkSrc)
 		}()
 		return chunkSrc
 	}
@@ -297,31 +299,31 @@ func TestLinq() {
 		fmt.Println()
 	}
 
-	fmt.Println("chunkchansource SkipWhile")
-	chunkSrc = getCChunkSrc()
-	dst, err = plinq.From(chunkSrc).SkipWhile(func(v interface{}) bool { return v.(int) <= 11 }).Results()
-	if err == nil {
-		fmt.Println("chunkchansource SkipWhile return", dst)
-		fmt.Println()
-	} else {
-		fmt.Println("chunkchansource SkipWhile get error:", err)
-		fmt.Println()
-	}
+	//fmt.Println("chunkchansource SkipWhile")
+	//chunkSrc = getCChunkSrc()
+	//dst, err = plinq.From(chunkSrc).SkipWhile(func(v interface{}) bool { return v.(int) <= 11 }).Results()
+	//if err == nil {
+	//	fmt.Println("chunkchansource SkipWhile return", dst)
+	//	fmt.Println()
+	//} else {
+	//	fmt.Println("chunkchansource SkipWhile get error:", err)
+	//	fmt.Println()
+	//}
 
-	fmt.Println("chunkchansource Take 14")
-	chunkSrc = getCChunkSrc()
-	dst, err = plinq.From(chunkSrc).Take(14).Results()
-	if err == nil {
-		fmt.Println("chunkchansource Take 14 return", dst)
-		fmt.Println()
-	} else {
-		fmt.Println("chunkchansource Take 14 get error:", err)
-		fmt.Println()
-	}
+	//fmt.Println("chunkchansource Take -1")
+	//chunkSrc = getCChunkSrc()
+	//dst, err = plinq.From(chunkSrc).Take(-1).Results()
+	//if err == nil {
+	//	fmt.Println("chunkchansource Take -1 return", dst)
+	//	fmt.Println()
+	//} else {
+	//	fmt.Println("chunkchansource Take -1 get error:", err)
+	//	fmt.Println()
+	//}
 
-	fmt.Println("chunkchansource Skip 14")
+	fmt.Println("chunkchansource Skip -1")
 	chunkSrc = getCChunkSrc()
-	dst, err = plinq.From(chunkSrc).Skip(14).Results()
+	dst, err = plinq.From(chunkSrc).Skip(-1).Results()
 	if err == nil {
 		fmt.Println("chunkchansource Skip 14 return", dst)
 		fmt.Println()
@@ -329,6 +331,28 @@ func TestLinq() {
 		fmt.Println("chunkchansource Skip 14 get error:", err)
 		fmt.Println()
 	}
+
+	//fmt.Println("chunkchansource Take 14")
+	//chunkSrc = getCChunkSrc()
+	//dst, err = plinq.From(chunkSrc).Take(14).Results()
+	//if err == nil {
+	//	fmt.Println("chunkchansource Take 14 return", dst)
+	//	fmt.Println()
+	//} else {
+	//	fmt.Println("chunkchansource Take 14 get error:", err)
+	//	fmt.Println()
+	//}
+
+	//fmt.Println("chunkchansource Skip 14")
+	//chunkSrc = getCChunkSrc()
+	//dst, err = plinq.From(chunkSrc).Skip(14).Results()
+	//if err == nil {
+	//	fmt.Println("chunkchansource Skip 14 return", dst)
+	//	fmt.Println()
+	//} else {
+	//	fmt.Println("chunkchansource Skip 14 get error:", err)
+	//	fmt.Println()
+	//}
 
 }
 
