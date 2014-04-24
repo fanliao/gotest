@@ -7,6 +7,7 @@ import (
 	//"os"
 	//"runtime/pprof"
 	//"errors"
+	"github.com/ahmetalpbalkan/go-linq"
 	"reflect"
 	"strconv"
 	"strings"
@@ -40,6 +41,12 @@ type RWTestStruct2 struct {
 	Date time.Time
 	RWTestStruct1
 	Ptr *RWTestStruct2
+}
+
+type user1 struct {
+	id    int
+	name  string
+	roles []string
 }
 
 func main() {
@@ -135,6 +142,7 @@ func main() {
 
 	//testPipeWhenDone()
 	//testMakeFunc()
+
 	func() {
 		defer func() {
 			if e := recover(); e != nil {
@@ -146,6 +154,13 @@ func main() {
 		c <- 1
 	}()
 	TestLinq()
+
+	users := make([]user1, 2, 2)
+	users[0] = user1{1, "u1", nil}
+	users[1] = user1{2, "u2", nil}
+	dst, err := linq.From(users).Except(users).Results()
+	fmt.Println("union users", dst, err)
+
 }
 
 func benchmarkFastRWerGet(n int) {
