@@ -94,13 +94,13 @@ func TestLinq() {
 		return q.Where(whereFunc).Select(selectFunc)
 	})
 
-	pSrc := &src1
-	q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
-	for i := count; i < count+10; i++ {
-		src1 = append(src1, i)
-	}
-	rs1, err1 := q1.Results()
-	fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
+	//pSrc := &src1
+	//q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
+	//for i := count; i < count+10; i++ {
+	//	src1 = append(src1, i)
+	//}
+	//rs1, err1 := q1.Results()
+	//fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
 
 	//test where and select with int slice
 	dst, _ := plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
@@ -146,6 +146,7 @@ func TestLinq() {
 		return q.Union(src2)
 	})
 
+	fmt.Println("test intersect", src1, src2)
 	//test intersect
 	testLinqWithAllSource("Intersect opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
 		return q.Intersect(src2)
