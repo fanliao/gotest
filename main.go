@@ -7,7 +7,7 @@ import (
 	//"os"
 	//"runtime/pprof"
 	//"errors"
-	"github.com/ahmetalpbalkan/go-linq"
+	//"github.com/ahmetalpbalkan/go-linq"
 	"reflect"
 	"strconv"
 	"strings"
@@ -155,11 +155,11 @@ func main() {
 	}()
 	TestLinq()
 
-	users := make([]user1, 2, 2)
-	users[0] = user1{1, "u1", nil}
-	users[1] = user1{2, "u2", nil}
-	dst, err := linq.From(users).Except(users).Results()
-	fmt.Println("union users", dst, err)
+	//users := make([]user1, 2, 2)
+	//users[0] = user1{1, "u1", nil}
+	//users[1] = user1{2, "u2", nil}
+	//dst, err := linq.From(users).Except(users).Results()
+	//fmt.Println("union users", dst, err)
 
 }
 

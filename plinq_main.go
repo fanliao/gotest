@@ -18,6 +18,7 @@ func getChanSrc(src []interface{}) chan interface{} {
 	go func() {
 		for _, v := range src {
 			chanSrc <- v
+			//fmt.Println("getChanSrc, send", v)
 		}
 		close(chanSrc)
 	}()
@@ -114,6 +115,7 @@ func TestLinq() {
 		return q.GroupBy(groupKeyFunc)
 	}, func(dst []interface{}) {
 		fmt.Println()
+		fmt.Println(dst)
 		for _, o := range dst {
 			kv := o.(*plinq.KeyValue)
 			fmt.Println("group get k=", kv.Key, ";v=", kv.Value, " ")
@@ -269,7 +271,7 @@ func TestLinq() {
 
 	size := count / 4
 	getChunkByi := func(i int) *plinq.Chunk {
-		return &plinq.Chunk{src1[i*size : (i+1)*size], i, 0}
+		return &plinq.Chunk{plinq.NewSlicer(src1[i*size : (i+1)*size]), i, 0}
 	}
 
 	getCChunkSrc := func() chan *plinq.Chunk {
