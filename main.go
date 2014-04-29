@@ -4,10 +4,11 @@ import (
 	"flag"
 	"fmt"
 	//"log"
-	//"os"
+	"bufio"
+	"os"
 	//"runtime/pprof"
 	//"errors"
-	"github.com/ahmetalpbalkan/go-linq"
+	//"github.com/ahmetalpbalkan/go-linq"
 	"reflect"
 	"strconv"
 	"strings"
@@ -143,24 +144,79 @@ func main() {
 	//testPipeWhenDone()
 	//testMakeFunc()
 
-	func() {
-		defer func() {
-			if e := recover(); e != nil {
-				fmt.Println("test send to close chan", e)
-			}
-		}()
-		c := make(chan int)
-		close(c)
-		c <- 1
-	}()
+	//func() {
+	//	defer func() {
+	//		if e := recover(); e != nil {
+	//			fmt.Println("test send to close chan", e)
+	//		}
+	//	}()
+	//	c := make(chan int)
+	//	close(c)
+	//	c <- 1
+	//}()
 	TestLinq()
 
-	users := make([]user1, 2, 2)
-	users[0] = user1{1, "u1", nil}
-	users[1] = user1{2, "u2", nil}
-	dst, err := linq.From(users).Except(users).Results()
-	fmt.Println("union users", dst, err)
+	//users := make([]user1, 2, 2)
+	//users[0] = user1{1, "u1", nil}
+	//users[1] = user1{2, "u2", nil}
+	//dst, err := linq.From(users).Except(users).Results()
+	//fmt.Println("union users", dst, err)
 
+	generatePerformanceTable("c:\\work\\linq.txt")
+
+}
+
+func generatePerformanceTable(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("open", path, "fail.", err)
+		return
+	}
+	defer file.Close()
+
+	iReader := bufio.NewReader(file)
+	plinqPerformances := make(map[string]int)
+	linqPerformances := make(map[string]int)
+	cols := []string{"Select", "Where", "Union", "Except", "Intersect", "Reverse", "Aggregate"}
+	for {
+		str, err := iReader.ReadString('\n')
+		if err != nil {
+			break
+		}
+
+		isPlinq := strings.Contains(str, "BenchmarkGoPLinq")
+		opr := str[strings.Index(str, "_")+1 : strings.Index(str, "-")]
+		t := strings.TrimSpace(str[strings.LastIndex(str[:strings.LastIndex(str, " ")], " ")+1 : strings.Index(str, "ns")])
+		fmt.Println(strings.LastIndex(str, " "), strings.Index(str, "ns"), opr, t)
+		t1, _ := strconv.Atoi(t)
+		if isPlinq {
+			plinqPerformances[opr] = t1
+		} else {
+			linqPerformances[opr] = t1
+		}
+		//  <tr>
+		//  <td>100</td><td>263987 </td><td>587863  </td><td>2048010   </td><td>4422503  </td><td>2833165</td><td>3569247 </td><td>114768   </td><td>159334</td>
+		// </tr>
+	}
+	fmt.Println("plinqPerformances=", plinqPerformances)
+	fmt.Println("linqPerformances=", linqPerformances)
+	plinqs := make([]string, 0, 7)
+	plinqs = append(plinqs, "\n<tr>\n")
+	for _, col := range cols {
+		plinqs = append(plinqs, "<td>")
+		plinqs = append(plinqs, strconv.Itoa(plinqPerformances[col]))
+		plinqs = append(plinqs, "</td>")
+	}
+	plinqs = append(plinqs, "\n</tr>\n")
+	plinqs = append(plinqs, "<tr>\n")
+	for _, col := range cols {
+		plinqs = append(plinqs, "<td>")
+		plinqs = append(plinqs, strconv.Itoa(linqPerformances[col]))
+		plinqs = append(plinqs, "</td>")
+	}
+	plinqs = append(plinqs, "\n</tr>\n")
+
+	fmt.Println(strings.Join(plinqs, ""))
 }
 
 func benchmarkFastRWerGet(n int) {

@@ -85,66 +85,66 @@ func TestLinq() {
 	}
 	_ = groupJoinResultSelector
 
-	testLinqOpr("Where opretion", func() ([]interface{}, error) {
-		return plinq.From(src1).Where(whereFunc).Results()
-	})
+	//testLinqOpr("Where opretion", func() ([]interface{}, error) {
+	//	return plinq.From(src1).Where(whereFunc).Results()
+	//})
 
-	//test where and select
-	testLinqWithAllSource("Where and Select opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.Where(whereFunc).Select(selectFunc)
-	})
+	////test where and select
+	//testLinqWithAllSource("Where and Select opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.Where(whereFunc).Select(selectFunc)
+	//})
 
-	pSrc := &src1
-	q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
-	for i := count; i < count+10; i++ {
-		src1 = append(src1, i)
-	}
-	rs1, err1 := q1.Results()
-	fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
+	//pSrc := &src1
+	//q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
+	//for i := count; i < count+10; i++ {
+	//	src1 = append(src1, i)
+	//}
+	//rs1, err1 := q1.Results()
+	//fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
 
-	//test where and select with int slice
-	dst, _ := plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
-	fmt.Println("Int slice where select return", dst, "\n")
+	////test where and select with int slice
+	//dst, _ := plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
+	//fmt.Println("Int slice where select return", dst, "\n")
 
-	dst, _ = plinq.From(getIntChanSrc(arrInts)).Where(whereFunc).Select(selectFunc).Results()
-	fmt.Println("Int chan where select return", dst, "\n")
+	//dst, _ = plinq.From(getIntChanSrc(arrInts)).Where(whereFunc).Select(selectFunc).Results()
+	//fmt.Println("Int chan where select return", dst, "\n")
 
-	//test group
-	testLinqWithAllSource("Group opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.GroupBy(groupKeyFunc)
-	}, func(dst []interface{}) {
-		fmt.Println()
-		for _, o := range dst {
-			kv := o.(*plinq.KeyValue)
-			fmt.Println("group get k=", kv.Key, ";v=", kv.Value, " ")
-		}
-	})
+	////test group
+	//testLinqWithAllSource("Group opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.GroupBy(groupKeyFunc)
+	//}, func(dst []interface{}) {
+	//	fmt.Println()
+	//	for _, o := range dst {
+	//		kv := o.(*plinq.KeyValue)
+	//		fmt.Println("group get k=", kv.Key, ";v=", kv.Value, " ")
+	//	}
+	//})
 
-	//test group
-	testLinqWithAllSource("Distinct opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.Distinct()
-	})
+	////test group
+	//testLinqWithAllSource("Distinct opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.Distinct()
+	//})
 
-	//test left join
-	testLinqWithAllSource("LeftJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.LeftJoin(powers,
-			func(o interface{}) interface{} { return o },
-			func(i interface{}) interface{} { return i.(power).i },
-			joinResultSelector)
-	})
+	////test left join
+	//testLinqWithAllSource("LeftJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.LeftJoin(powers,
+	//		func(o interface{}) interface{} { return o },
+	//		func(i interface{}) interface{} { return i.(power).i },
+	//		joinResultSelector)
+	//})
 
-	//test left group join
-	testLinqWithAllSource("LeftGroupJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.LeftGroupJoin(powers,
-			func(o interface{}) interface{} { return o },
-			func(i interface{}) interface{} { return i.(power).i },
-			groupJoinResultSelector)
-	})
+	////test left group join
+	//testLinqWithAllSource("LeftGroupJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.LeftGroupJoin(powers,
+	//		func(o interface{}) interface{} { return o },
+	//		func(i interface{}) interface{} { return i.(power).i },
+	//		groupJoinResultSelector)
+	//})
 
-	//test union
-	testLinqWithAllSource("Union opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-		return q.Union(src2)
-	})
+	////test union
+	//testLinqWithAllSource("Union opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+	//	return q.Union(src2)
+	//})
 
 	//test intersect
 	testLinqWithAllSource("Intersect opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
@@ -254,6 +254,12 @@ func TestLinq() {
 		return q.Aggregate(myAgg)
 	})
 
+	testLinqFindSingleWithAllSource("FirstOf opretions", src1, func(q *plinq.Queryable) (interface{}, bool, error) {
+		return q.FirstOf(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
+	})
+	testLinqFindSingleWithAllSource("FirstOf opretions appears error", src1, func(q *plinq.Queryable) (interface{}, bool, error) {
+		return q.FirstOf(func(v interface{}) bool { panic(errors.New("!error")) })
+	})
 	//fmt.Print("distinctKvs return:")
 	//concats, _ := plinq.From(src1).Concat(src2).Results()
 	//kvs, e := distinctKVs(concats, &plinq.ParallelOption{numCPU, plinq.DEFAULTCHUNKSIZE, false})
@@ -266,7 +272,7 @@ func TestLinq() {
 	//	fmt.Println(e.Error(), "\n")
 	//}
 
-	size := count / 4
+	size := count / 5
 	getChunkByi := func(i int) *plinq.Chunk {
 		return &plinq.Chunk{src1[i*size : (i+1)*size], i, 0}
 	}
@@ -279,7 +285,7 @@ func TestLinq() {
 					_ = e
 				}
 			}()
-			indexs := []int{0, 2, 1, 3}
+			indexs := []int{0, 3, 1, 2, 4}
 			for _, i := range indexs {
 				chunkSrc <- getChunkByi(i)
 			}
@@ -353,25 +359,25 @@ func TestLinq() {
 		fmt.Println()
 	}
 
-	fmt.Println("chunkchansource Take 14")
+	fmt.Println("chunkchansource Take 12")
 	chunkSrc = getCChunkSrc()
-	dst, err = plinq.From(chunkSrc).Take(14).Results()
+	dst, err = plinq.From(chunkSrc).Take(12).Results()
 	if err == nil {
-		fmt.Println("chunkchansource Take 14 return", dst)
+		fmt.Println("chunkchansource Take 12 return", dst)
 		fmt.Println()
 	} else {
-		fmt.Println("chunkchansource Take 14 get error:\n", err)
+		fmt.Println("chunkchansource Take 12 get error:\n", err)
 		fmt.Println()
 	}
 
-	fmt.Println("chunkchansource Skip 14")
+	fmt.Println("chunkchansource Skip 12")
 	chunkSrc = getCChunkSrc()
-	dst, err = plinq.From(chunkSrc).Skip(14).Results()
+	dst, err = plinq.From(chunkSrc).Skip(12).Results()
 	if err == nil {
-		fmt.Println("chunkchansource Skip 14 return", dst)
+		fmt.Println("chunkchansource Skip 12 return", dst)
 		fmt.Println()
 	} else {
-		fmt.Println("chunkchansource Skip 14 get error:\n", err)
+		fmt.Println("chunkchansource Skip 12 get error:\n", err)
 		fmt.Println()
 	}
 
@@ -383,6 +389,17 @@ func TestLinq() {
 		fmt.Println()
 	} else {
 		fmt.Println("chunkchansource ElementAt 14 get error:\n", err1)
+		fmt.Println()
+	}
+
+	fmt.Println("chunkchansource FirstOf v%11=0")
+	chunkSrc = getCChunkSrc()
+	r, found, err1 := plinq.From(chunkSrc).FirstOf(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
+	if err1 == nil {
+		fmt.Println("chunkchansource FirstOf v%11=0 return", r, "found is", found)
+		fmt.Println()
+	} else {
+		fmt.Println("chunkchansource FirstOf v%11=0 get error:\n", err1)
 		fmt.Println()
 	}
 
@@ -415,10 +432,21 @@ func testLinqAgg(title string, aggFunc func() (interface{}, error)) {
 	}
 }
 
+func testLinqSingle(title string, singleFunc func() (interface{}, bool, error)) {
+	fmt.Print(title, " ")
+	if dst, found, err := singleFunc(); err == nil {
+		fmt.Printf("return:%v, found:%v", dst, found)
+		fmt.Println("\n")
+	} else {
+		fmt.Println("get error:\n", err, "\n")
+	}
+}
+
 func testLinqWithAllSource(title string, listSrc []interface{}, query func(*plinq.Queryable) *plinq.Queryable, rsHandlers ...func([]interface{})) {
 	testLinqOpr(title, func() ([]interface{}, error) {
 		return query(plinq.From(listSrc)).SetSizeOfChunk(9).Results()
 	}, rsHandlers...)
+	fmt.Println("listSrc=", listSrc)
 	testLinqOpr("Chan source use "+title, func() ([]interface{}, error) {
 		return query(plinq.From(getChanSrc(listSrc))).SetSizeOfChunk(9).Results()
 	}, rsHandlers...)
@@ -430,6 +458,15 @@ func testLinqAggWithAllSource(title string, listSrc []interface{}, agg func(*pli
 	})
 	testLinqAgg("Chan source use "+title, func() (interface{}, error) {
 		return agg(plinq.From(getChanSrc(listSrc)))
+	})
+}
+
+func testLinqFindSingleWithAllSource(title string, listSrc []interface{}, single func(*plinq.Queryable) (interface{}, bool, error)) {
+	testLinqSingle(title, func() (interface{}, bool, error) {
+		return single(plinq.From(listSrc))
+	})
+	testLinqSingle("Chan source use "+title, func() (interface{}, bool, error) {
+		return single(plinq.From(getChanSrc(listSrc)))
 	})
 }
 
