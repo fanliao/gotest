@@ -95,6 +95,22 @@ func TestLinq() {
 		return q.Where(whereFunc).Select(selectFunc)
 	})
 
+	//test SelectMany
+	testLinqWithAllSource("SelectMany opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.SelectMany(func(v interface{}) []interface{} {
+			rs := make([]interface{}, 3)
+			rs[0] = v.(int) + 100
+			rs[1] = v.(int) + 200
+			rs[2] = v.(int) + 300
+			return rs
+		})
+	})
+
+	testLinqWithAllSource("SelectMany opretions with error", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.SelectMany(func(v interface{}) []interface{} {
+			panic(errors.New("!error"))
+		})
+	})
 	//pSrc := &src1
 	//q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
 	//for i := count; i < count+10; i++ {
