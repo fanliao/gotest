@@ -85,11 +85,6 @@ func TestLinq() {
 	}
 	_ = groupJoinResultSelector
 
-<<<<<<< HEAD
-	//testLinqOpr("Where opretion", func() ([]interface{}, error) {
-	//	return plinq.From(src1).Where(whereFunc).Results()
-	//})
-=======
 	testLinqOpr("Where opretion", func() ([]interface{}, error) {
 		return plinq.From(src1).Where(whereFunc).Results()
 	})
@@ -110,64 +105,63 @@ func TestLinq() {
 	//test where and select with int slice
 	dst, _ := plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
 	fmt.Println("Int slice where select return", dst, "\n")
->>>>>>> 9d311490212a733963f7821e66bfbbf71a3e0c8b
 
-	////test where and select
-	//testLinqWithAllSource("Where and Select opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Where(whereFunc).Select(selectFunc)
-	//})
+	//test where and select
+	testLinqWithAllSource("Where and Select opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Where(whereFunc).Select(selectFunc)
+	})
 
-	//pSrc := &src1
-	//q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
-	//for i := count; i < count+10; i++ {
-	//	src1 = append(src1, i)
-	//}
-	//rs1, err1 := q1.Results()
-	//fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
+	pSrc := &src1
+	q1 := plinq.From(pSrc).Where(whereFunc).Select(selectFunc)
+	for i := count; i < count+10; i++ {
+		src1 = append(src1, i)
+	}
+	rs1, err1 := q1.Results()
+	fmt.Println("Where and Select from Pointer returns", rs1, err1, "\n")
 
-	////test where and select with int slice
-	//dst, _ := plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
-	//fmt.Println("Int slice where select return", dst, "\n")
+	//test where and select with int slice
+	dst, _ = plinq.From(arrInts).Where(whereFunc).Select(selectFunc).Results()
+	fmt.Println("Int slice where select return", dst, "\n")
 
-	//dst, _ = plinq.From(getIntChanSrc(arrInts)).Where(whereFunc).Select(selectFunc).Results()
-	//fmt.Println("Int chan where select return", dst, "\n")
+	dst, _ = plinq.From(getIntChanSrc(arrInts)).Where(whereFunc).Select(selectFunc).Results()
+	fmt.Println("Int chan where select return", dst, "\n")
 
-	////test group
-	//testLinqWithAllSource("Group opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.GroupBy(groupKeyFunc)
-	//}, func(dst []interface{}) {
-	//	fmt.Println()
-	//	for _, o := range dst {
-	//		kv := o.(*plinq.KeyValue)
-	//		fmt.Println("group get k=", kv.Key, ";v=", kv.Value, " ")
-	//	}
-	//})
+	//test group
+	testLinqWithAllSource("Group opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.GroupBy(groupKeyFunc)
+	}, func(dst []interface{}) {
+		fmt.Println()
+		for _, o := range dst {
+			kv := o.(*plinq.KeyValue)
+			fmt.Println("group get k=", kv.Key, ";v=", kv.Value, " ")
+		}
+	})
 
-	////test group
-	//testLinqWithAllSource("Distinct opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Distinct()
-	//})
+	//test group
+	testLinqWithAllSource("Distinct opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Distinct()
+	})
 
-	////test left join
-	//testLinqWithAllSource("LeftJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.LeftJoin(powers,
-	//		func(o interface{}) interface{} { return o },
-	//		func(i interface{}) interface{} { return i.(power).i },
-	//		joinResultSelector)
-	//})
+	//test left join
+	testLinqWithAllSource("LeftJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.LeftJoin(powers,
+			func(o interface{}) interface{} { return o },
+			func(i interface{}) interface{} { return i.(power).i },
+			joinResultSelector)
+	})
 
-	////test left group join
-	//testLinqWithAllSource("LeftGroupJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.LeftGroupJoin(powers,
-	//		func(o interface{}) interface{} { return o },
-	//		func(i interface{}) interface{} { return i.(power).i },
-	//		groupJoinResultSelector)
-	//})
+	//test left group join
+	testLinqWithAllSource("LeftGroupJoin opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.LeftGroupJoin(powers,
+			func(o interface{}) interface{} { return o },
+			func(i interface{}) interface{} { return i.(power).i },
+			groupJoinResultSelector)
+	})
 
-	////test union
-	//testLinqWithAllSource("Union opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
-	//	return q.Union(src2)
-	//})
+	//test union
+	testLinqWithAllSource("Union opretions", src1, func(q *plinq.Queryable) *plinq.Queryable {
+		return q.Union(src2)
+	})
 
 	fmt.Println("test intersect", src1, src2)
 	//test intersect
@@ -279,10 +273,10 @@ func TestLinq() {
 	})
 
 	testLinqFindSingleWithAllSource("FirstOf opretions", src1, func(q *plinq.Queryable) (interface{}, bool, error) {
-		return q.FirstOf(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
+		return q.FirstBy(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
 	})
 	testLinqFindSingleWithAllSource("FirstOf opretions appears error", src1, func(q *plinq.Queryable) (interface{}, bool, error) {
-		return q.FirstOf(func(v interface{}) bool { panic(errors.New("!error")) })
+		return q.FirstBy(func(v interface{}) bool { panic(errors.New("!error")) })
 	})
 	//fmt.Print("distinctKvs return:")
 	//concats, _ := plinq.From(src1).Concat(src2).Results()
@@ -298,7 +292,7 @@ func TestLinq() {
 
 	size := count / 5
 	getChunkByi := func(i int) *plinq.Chunk {
-		return &plinq.Chunk{src1[i*size : (i+1)*size], i, 0}
+		return &plinq.Chunk{plinq.NewSlicer(src1[i*size : (i+1)*size]), i, 0}
 	}
 
 	getCChunkSrc := func() chan *plinq.Chunk {
@@ -418,7 +412,7 @@ func TestLinq() {
 
 	fmt.Println("chunkchansource FirstOf v%11=0")
 	chunkSrc = getCChunkSrc()
-	r, found, err1 := plinq.From(chunkSrc).FirstOf(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
+	r, found, err1 := plinq.From(chunkSrc).FirstBy(func(v interface{}) bool { return v.(int)/11 > 0 && v.(int)%11 == 0 })
 	if err1 == nil {
 		fmt.Println("chunkchansource FirstOf v%11=0 return", r, "found is", found)
 		fmt.Println()
