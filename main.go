@@ -10,6 +10,7 @@ import (
 	//"errors"
 	//"github.com/ahmetalpbalkan/go-linq"
 	"reflect"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"time"
@@ -154,15 +155,22 @@ func main() {
 	//	close(c)
 	//	c <- 1
 	//}()
-	TestLinq()
+
+	//TestLinq()
 
 	//users := make([]user1, 2, 2)
 	//users[0] = user1{1, "u1", nil}
 	//users[1] = user1{2, "u2", nil}
 	//dst, err := linq.From(users).Except(users).Results()
 	//fmt.Println("union users", dst, err)
-
+	//flag.Parse()
+	//if *cpuprofile != "" {
+	f, _ := os.Create("gotest.prof")
+	pprof.StartCPUProfile(f)
+	//TestLinq()
 	generatePerformanceTable("c:\\work\\linq.txt")
+	defer pprof.StopCPUProfile()
+	//}
 
 }
 
@@ -175,46 +183,66 @@ func generatePerformanceTable(path string) {
 	defer file.Close()
 
 	iReader := bufio.NewReader(file)
-	plinqPerformances := make(map[string]int)
-	linqPerformances := make(map[string]int)
-	cols := []string{"Select", "Where", "Union", "Except", "Intersect", "Reverse", "Aggregate"}
+	plinqPerformances := make(map[string]float64)
+	linqPerformances := make(map[string]float64)
+	cols := []string{"Select", "Where", "Union", "Except", "Intersect", "Reverse", "Sum", "SkipWhile", "FirstBy"}
+	//var t1 float64
 	for {
 		str, err := iReader.ReadString('\n')
 		if err != nil {
 			break
 		}
-
-		isPlinq := strings.Contains(str, "BenchmarkGoPLinq")
-		opr := str[strings.Index(str, "_")+1 : strings.Index(str, "-")]
-		t := strings.TrimSpace(str[strings.LastIndex(str[:strings.LastIndex(str, " ")], " ")+1 : strings.Index(str, "ns")])
-		fmt.Println(strings.LastIndex(str, " "), strings.Index(str, "ns"), opr, t)
-		t1, _ := strconv.Atoi(t)
-		if isPlinq {
-			plinqPerformances[opr] = t1
-		} else {
-			linqPerformances[opr] = t1
+		if !strings.Contains(str, "Benchmark") {
+			continue
 		}
-		//  <tr>
-		//  <td>100</td><td>263987 </td><td>587863  </td><td>2048010   </td><td>4422503  </td><td>2833165</td><td>3569247 </td><td>114768   </td><td>159334</td>
-		// </tr>
+
+		func() {
+			defer func() {
+				_ = recover()
+			}()
+			isPlinq := strings.Contains(str, "BenchmarkGoPLinq")
+			opr := str[strings.Index(str, "_")+1 : strings.Index(str, "-")]
+			t := strings.TrimSpace(str[strings.LastIndexAny(str[:strings.LastIndex(str, " ")], "\t ")+1 : strings.Index(str, "ns")])
+			//fmt.Println(strings.LastIndex(str, " "), strings.Index(str, "ns"), opr, t)
+			t1, _ := strconv.ParseFloat(t, 64)
+			//fmt.Println("convert", t, "get", t1, err)
+			//fmt.Println(isPlinq, opr, t1, float64(t1)/float64(1000*1000))
+			if isPlinq {
+				plinqPerformances[opr] = t1 / float64(1000*1000)
+			} else {
+				linqPerformances[opr] = t1 / float64(1000*1000)
+			}
+			//  <tr>
+			//  <td>100</td><td>263987 </td><td>587863  </td><td>2048010   </td><td>4422503  </td><td>2833165</td><td>3569247 </td><td>114768   </td><td>159334</td>
+			// </tr>
+		}()
 	}
 	fmt.Println("plinqPerformances=", plinqPerformances)
 	fmt.Println("linqPerformances=", linqPerformances)
 	plinqs := make([]string, 0, 7)
-	plinqs = append(plinqs, "\n<tr>\n")
+	plinqs = append(plinqs, "\n  <tr>\n    <th></th>")
+	for _, col := range cols {
+		plinqs = append(plinqs, "<th>")
+		plinqs = append(plinqs, col)
+		plinqs = append(plinqs, "</th>")
+	}
+	plinqs = append(plinqs, "\n  </tr>\n")
+	plinqs = append(plinqs, "\n  <tr>\n")
+	plinqs = append(plinqs, "    <td>go-plinq</td>")
 	for _, col := range cols {
 		plinqs = append(plinqs, "<td>")
-		plinqs = append(plinqs, strconv.Itoa(plinqPerformances[col]))
+		plinqs = append(plinqs, strconv.FormatFloat(plinqPerformances[col], 'f', 3, 32))
 		plinqs = append(plinqs, "</td>")
 	}
-	plinqs = append(plinqs, "\n</tr>\n")
-	plinqs = append(plinqs, "<tr>\n")
+	plinqs = append(plinqs, "\n  </tr>\n")
+	plinqs = append(plinqs, "  <tr>\n")
+	plinqs = append(plinqs, "    <td>go-linq</td>")
 	for _, col := range cols {
 		plinqs = append(plinqs, "<td>")
-		plinqs = append(plinqs, strconv.Itoa(linqPerformances[col]))
+		plinqs = append(plinqs, strconv.FormatFloat(linqPerformances[col], 'f', 3, 32))
 		plinqs = append(plinqs, "</td>")
 	}
-	plinqs = append(plinqs, "\n</tr>\n")
+	plinqs = append(plinqs, "\n  </tr>\n")
 
 	fmt.Println(strings.Join(plinqs, ""))
 }
